@@ -47,7 +47,6 @@
 2. **配置 (可选)**
    复制 `.env.example` 为 `.env` 并按需修改：
    ```bash
-   cp backend/deeppresenter/deeppresenter/mcp.json.example backend/deeppresenter/deeppresenter/mcp.json
    cp .env.example .env
    ```
    您可以在 `.env` 文件中配置数据库、LLM API Key 等。

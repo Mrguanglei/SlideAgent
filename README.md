@@ -47,7 +47,6 @@
 2. **Configuration (Optional)**
    Copy `.env.example` to `.env` and modify as needed:
    ```bash
-   cp backend/deeppresenter/deeppresenter/mcp.json.example backend/deeppresenter/deeppresenter/mcp.json
    cp .env.example .env
    ```
    You can configure database, LLM API Key, etc. in the `.env` file.
