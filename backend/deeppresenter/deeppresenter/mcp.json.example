@@ -1,0 +1,25 @@
+[
+  {
+    "name": "deeppresenter",
+    "description": "DeepPresenter Tools",
+    "command": "python",
+    "args": ["/app/deeppresenter/deeppresenter/tools/server.py", "$WORKSPACE"],
+    "env": {
+      "MINERU_API_KEY": "$MINERU_API_KEY",
+      "TAVILY_API_KEY": "tvly-dev-xxx",
+      "TAVILY_BACKUP": "tvly-dev-xxx",
+      "LLM_CONFIG_FILE": "$LLM_CONFIG_FILE"
+    }
+  },
+  {
+    "name": "pptagent",
+    "description": "https://github.com/icip-cas/PPTAgent",
+    "command": "pptagent-mcp",
+    "args": [],
+    "env": {
+      "PPTAGENT_MODEL": "doubao-seed-1-8-251228",
+      "PPTAGENT_API_KEY": "xxxx",
+      "PPTAGENT_API_BASE": "https://ark.cn-beijing.volces.com/api/v3"
+    }
+  }
+]

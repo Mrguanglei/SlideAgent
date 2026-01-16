@@ -1,0 +1,115 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pptagent"
+authors = [{ name = "Hao Zheng", email = "wszh712811@gmail.com" }]
+description = "PPTAgent, a tool for utilizing LLMs to generate PowerPoint presentations from documents."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dynamic = ["version"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Topic :: Office/Business :: Office Suites",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+keywords = [
+    "presentation",
+    "powerpoint",
+    "ppt",
+    "llm",
+    "ai",
+    "document-processing",
+]
+dependencies = [
+    "aiometer",
+    "aiofiles",
+    "aiohttp",
+    "beautifulsoup4",
+    "fastapi[all]",
+    "fastmcp>=2.10.0",
+    "func_argparse",
+    "html2image",
+    "jinja2",
+    "json_repair",
+    "jsonlines",
+    "lxml",
+    "mcp>=1.14.0",
+    "mistune",
+    "numpy<2.0.0",
+    "oaib",
+    "openai>=1.107.3",
+    "opencv-python-headless",
+    "openpyxl",
+    "pdf2image",
+    "pillow",
+    "pydantic>=2.10.0",
+    "PyYAML",
+    "python-Levenshtein",
+    "python-multipart",
+    "pptagent-pptx>=0.0.1",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-xdist",
+    "rich",
+    "socksio",
+    "tenacity",
+    "uvicorn",
+]
+
+[project.optional-dependencies]
+full = [
+    "transformers<4.50.0",
+    "fasttext",
+    "einops",
+    "peft",
+    "huggingface_hub",
+    "timm",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/icip-cas/PPTAgent"
+"Bug Tracker" = "https://github.com/icip-cas/PPTAgent/issues"
+
+[project.scripts]
+pptagent-mcp = "pptagent.mcp_server:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pptagent*"]
+exclude = ["pptagent_ui*", "test"]
+
+[tool.setuptools.package-data]
+"pptagent" = [
+    "prompts/*.txt",
+    "prompts/**/*.txt",
+    "roles/*.yaml",
+    "resource/*.png",
+    "templates/**/*.txt",
+    "templates/**/*.json",
+    "templates/**/*.pptx",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "llm: mark test as using LLM (requires OPENAI_API_KEY)",
+    "parse: mark test as using minerU API",
+    "asyncio: mark test as using asyncio",
+]
+
+[tool.ruff.lint]
+ignore = ["F403", "F405", "E741"]
+
+
+[tool.setuptools.dynamic]
+version = { attr = "pptagent.__version__" }

@@ -1,0 +1,9 @@
+recursive-include pptagent/prompts *.txt
+recursive-include pptagent/roles *.yaml
+recursive-include pptagent/resource *.png
+recursive-include pptagent/templates *.txt
+recursive-include pptagent/templates *.json
+recursive-include pptagent/templates *.pptx
+
+prune pptagent_ui
+prune test
