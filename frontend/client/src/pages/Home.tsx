@@ -271,15 +271,16 @@ export default function Home() {
         setPptProject(project);
 
         // 恢复 PPT HTML 代码
-        if (project.versions && project.versions.length > 0) {
-          const latestVersion = project.versions[project.versions.length - 1];
-          if (latestVersion.slides) {
-            const htmlCode = latestVersion.slides
-              .sort((a: any, b: any) => a.page_number - b.page_number)
-              .map((slide: any) => slide.html_content)
-              .join("\n");
-            setPptHtmlCode(htmlCode);
-          }
+        // 后端返回的数据结构：project.slides（不是project.versions[].slides）
+        if (project.slides && project.slides.length > 0) {
+          const htmlCode = project.slides
+            .sort((a: any, b: any) => a.page_number - b.page_number)
+            .map((slide: any) => slide.html_content)
+            .join("\n");
+          setPptHtmlCode(htmlCode);
+          console.log("[PPT恢复] 成功恢复", project.slides.length, "张幻灯片");
+        } else {
+          console.warn("[PPT恢复] 未找到幻灯片数据", project);
         }
 
         // 使用 PPT 项目标题
