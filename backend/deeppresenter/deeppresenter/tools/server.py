@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from appcore import mcp
+from .appcore import mcp
 
 from deeppresenter.utils.log import info, warning
 
@@ -20,16 +20,16 @@ if __name__ == "__main__":
     )
 
     import os
-    import any2markdown  # noqa: F401
-    import fetch  # noqa: F401
-    import research  # noqa: F401
-    import richfile  # noqa: F401
-    import task  # noqa: F401
-    import tool_agents  # noqa: F401
-    import html_tools  # noqa: F401
+    from . import any2markdown  # noqa: F401
+    from . import fetch  # noqa: F401
+    from . import research  # noqa: F401
+    from . import richfile  # noqa: F401
+    from . import task  # noqa: F401
+    from . import tool_agents  # noqa: F401
+    from . import html_tools  # noqa: F401
 
     if os.getenv("TAVILY_API_KEY", None):
-        import search  # noqa: F401
+        from . import search  # noqa: F401
     else:
         warning("No search tool is configured.")
 

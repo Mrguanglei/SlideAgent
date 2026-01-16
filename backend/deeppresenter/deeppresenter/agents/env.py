@@ -43,9 +43,27 @@ class AgentEnv:
             workspace = Path(workspace)
         self.workspace = workspace.absolute()
         self.cutoff_len = cutoff_len
-        with open(config.mcp_config_file, encoding="utf-8") as f:
-            raw_conf = json.load(f)
-            self.mcp_configs: list[MCPServer] = [MCPServer(**s) for s in raw_conf]
+        
+        # 自动配置 deeppresenter MCP 服务器
+        from deeppresenter.utils.typings import MCPServer
+        import sys
+        import os
+
+        # 传递必要的环境变量给 MCP 服务器子进程
+        mcp_env = {}
+        for key in ["PPTAGENT_API_BASE", "PPTAGENT_MODEL", "PPTAGENT_API_KEY",
+                    "DESIGN_AGENT_BASE_URL", "DESIGN_AGENT_MODEL", "DESIGN_AGENT_API_KEY"]:
+            if key in os.environ:
+                mcp_env[key] = os.environ[key]
+
+        deeppresenter_server = MCPServer(
+            name="deeppresenter",
+            description="DeepPresenter internal tools for PPT generation",
+            command=sys.executable,  # Python 解释器路径
+            args=["-m", "deeppresenter.tools.server", str(self.workspace)],
+            env=mcp_env,  # 传递环境变量
+        )
+        self.mcp_configs: list[MCPServer] = [deeppresenter_server]
         # Pass workspace-specific variables to client to avoid global env pollution
         self.client = MCPClient(
             WORKSPACE=str(self.workspace),

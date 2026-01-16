@@ -8,7 +8,7 @@ import logging
 from typing import List, Dict, Optional, AsyncGenerator
 
 from utils.config import Config
-from services.llm import call_doubao_api, call_doubao_api_stream, extract_core_topic
+from services.llm import call_llm_api, call_llm_api_stream, extract_core_topic
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,7 @@ async def generate_search_queries(topic: str, supplement_data: dict) -> List[str
 """
 
     try:
-        response = await call_doubao_api([
+        response = await call_llm_api([
             {"role": "system", "content": "你是一个资深的信息检索专家。你需要深入分析主题特点，生成最有价值的搜索关键词。不要使用固定模板，要根据具体主题灵活思考。只输出关键词，每行一个。"},
             {"role": "user", "content": prompt}
         ])
@@ -182,7 +182,7 @@ async def stream_search_thinking(query: str, search_results: list, round_num: in
 直接输出总结，不要有其他内容。"""
 
     try:
-        async for chunk in call_doubao_api_stream([
+        async for chunk in call_llm_api_stream([
             {"role": "system", "content": "你是一个信息整理助手，请简短总结搜索结果。"},
             {"role": "user", "content": prompt}
         ]):
@@ -227,7 +227,7 @@ async def stream_deep_thinking(topic: str, search_results: list) -> AsyncGenerat
 请根据实际搜索结果内容进行分析，不要编造信息。"""
 
     try:
-        async for chunk in call_doubao_api_stream([
+        async for chunk in call_llm_api_stream([
             {"role": "system", "content": "你是一个专业的信息分析助手，擅长从搜索结果中提取关键信息并进行深度分析。请按照用户要求的格式输出分析结果。"},
             {"role": "user", "content": prompt}
         ]):

@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 from typing import Literal
 
-from appcore import mcp
+from .appcore import mcp
 from filelock import FileLock
 from pptx import Presentation
 from pydantic import BaseModel

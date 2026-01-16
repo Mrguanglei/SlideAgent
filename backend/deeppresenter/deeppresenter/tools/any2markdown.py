@@ -4,7 +4,7 @@ import re
 import uuid
 from pathlib import Path
 
-from appcore import mcp
+from .appcore import mcp
 from markitdown import MarkItDown
 from PIL import Image
 

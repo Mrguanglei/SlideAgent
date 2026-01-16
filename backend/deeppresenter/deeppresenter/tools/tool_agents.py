@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 import httpx
-from appcore import mcp
+from .appcore import mcp
 from PIL import Image
 
 from deeppresenter.utils.config import DeepPresenterConfig

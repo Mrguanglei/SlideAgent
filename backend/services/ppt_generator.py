@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import AsyncGenerator, Optional, Dict, List
 
 from utils.config import Config
-from services.llm import call_doubao_api
+from services.llm import call_llm_api
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ async def generate_slide_thinking(slide_count: int, topic: str) -> Optional[str]
 
 请直接输出一句话，不要添加任何前缀或后缀。"""
         
-        thinking_response = await call_doubao_api([
+        thinking_response = await call_llm_api([
             {"role": "system", "content": "你是一个 PPT 生成助手，请用简短的一句话说明下一步要做什么。"},
             {"role": "user", "content": thinking_prompt}
         ])

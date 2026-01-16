@@ -8,7 +8,7 @@ import json
 import logging
 from typing import Dict, Optional, AsyncGenerator, Tuple
 
-from services.llm import call_doubao_api, call_doubao_api_stream, clean_json_response
+from services.llm import call_llm_api, call_llm_api_stream, clean_json_response
 from utils.config import Config
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 async def check_ppt_intent(instruction: str) -> bool:
     """检查用户输入是否是 PPT 制作需求"""
-    if not Config.DOUBAO_API_KEY:
+    if not Config.LLM_API_KEY:
         # 如果没有配置 API,则回退到简单关键词判断
         keywords = ["ppt", "幻灯片", "演示", "slide", "presentation", "制作", "生成", "帮我做", "做一个", "介绍", "讲解", "分析"]
         return any(kw in instruction.lower() for kw in keywords)
@@ -44,7 +44,7 @@ async def check_ppt_intent(instruction: str) -> bool:
 
 只回答"是"或"否",不要有其他内容。"""
 
-        response = await call_doubao_api([
+        response = await call_llm_api([
             {"role": "system", "content": "你是一个意图识别助手。记住：用户在使用PPT制作助手，所以'介绍XX'、'讲解XX'都应该理解为需要制作PPT。只需要回答'是'或'否'。"},
             {"role": "user", "content": prompt}
         ])
@@ -90,7 +90,7 @@ async def generate_supplement_info_with_llm(topic: str) -> dict:
 只输出JSON，不要有其他内容。"""
 
     try:
-        response = await call_doubao_api([
+        response = await call_llm_api([
             {"role": "system", "content": "你是一个专业的PPT制作助手，擅长分析用户需求并提供合适的选项。请只输出JSON格式的结果。"},
             {"role": "user", "content": prompt}
         ])
@@ -172,7 +172,7 @@ async def stream_task_plan_with_llm(topic: str, supplement_data: dict) -> AsyncG
 
     full_text = ""
     try:
-        async for chunk in call_doubao_api_stream([
+        async for chunk in call_llm_api_stream([
             {"role": "system", "content": "你是一个专业的PPT制作助手，擅长分析用户需求并规划任务步骤。请按照用户要求的格式输出分析结果。"},
             {"role": "user", "content": prompt}
         ]):
@@ -288,7 +288,7 @@ async def stream_outline_generation(topic: str, search_results: list, deep_think
 **重要要求**：页数必须严格为 {num_pages} 页！"""
 
     try:
-        async for chunk in call_doubao_api_stream([
+        async for chunk in call_llm_api_stream([
             {"role": "system", "content": "你是一个专业的PPT内容策划师，擅长根据搜索结果生成结构化的PPT大纲。请严格按照用户要求的格式和页数输出。"},
             {"role": "user", "content": prompt}
         ]):

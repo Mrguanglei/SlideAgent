@@ -3,7 +3,7 @@ import re
 from typing import Any, Literal
 
 import arxiv
-from appcore import mcp
+from .appcore import mcp
 from semanticscholar import SemanticScholar
 from semanticscholar.Author import Author
 

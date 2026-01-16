@@ -87,8 +87,14 @@ async def export_ppt_file(
         # 提取 HTML 内容
         slides_html = [slide.html_content for slide in sorted(slides, key=lambda s: s.page_number)]
         
-        # 清理标题（用于文件名）
-        safe_title = "".join(c for c in project.title if c.isalnum() or c in (' ', '-', '_')).strip()
+        # 清理标题（用于文件名）- 只保留ASCII字符避免编码问题
+        import re
+        from urllib.parse import quote
+        
+        # 移除所有非-ASCII字符，只保留英文字母、数字、空格、连字符和下划线
+        safe_title = re.sub(r'[^a-zA-Z0-9\s\-_]', '', project.title).strip()
+        # 将多个空格替换为单个下划线
+        safe_title = re.sub(r'\s+', '_', safe_title)
         safe_title = safe_title[:50] or "presentation"
         
         # 导出

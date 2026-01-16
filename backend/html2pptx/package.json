@@ -1,0 +1,24 @@
+{
+  "name": "html2pptx",
+  "version": "1.0.0",
+  "description": "Convert HTML slides to PPTX",
+  "main": "html2pptx.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "pptxgenjs": "^4.0.1",
+    "playwright": "^1.57.0",
+    "fast-glob": "^3.3.3",
+    "minimist": "^1.2.8",
+    "sharp": "^0.34.5"
+  },
+  "keywords": [
+    "pptx",
+    "powerpoint",
+    "html",
+    "converter"
+  ],
+  "author": "",
+  "license": "MIT"
+}

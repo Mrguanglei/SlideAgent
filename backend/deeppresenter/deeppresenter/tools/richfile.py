@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 import httpx
-from appcore import mcp
+from .appcore import mcp
 from fake_useragent import UserAgent
 from mcp.types import ImageContent
 from mistune import html as markdown_to_html

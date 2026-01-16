@@ -12,7 +12,7 @@
 import json
 from pathlib import Path
 
-from appcore import mcp
+from .appcore import mcp
 
 # 全局状态管理
 _design_state = {

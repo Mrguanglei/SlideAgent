@@ -410,15 +410,62 @@ class DeepPresenterConfig(BaseModel):
         return super().model_post_init(context)
 
     @classmethod
+    def load_from_env(cls) -> "DeepPresenterConfig":
+        """Load configuration from environment variables"""
+        import os
+        
+        # 从环境变量构建配置
+        def get_llm_config(prefix: str, fallback_prefix: str = "PPTAGENT") -> dict:
+            """Get LLM configuration from environment variables with fallback"""
+            return {
+                "base_url": os.getenv(f"{prefix}_BASE_URL") or os.getenv(f"{fallback_prefix}_API_BASE"),
+                "model": os.getenv(f"{prefix}_MODEL") or os.getenv(f"{fallback_prefix}_MODEL"),
+                "api_key": os.getenv(f"{prefix}_API_KEY") or os.getenv(f"{fallback_prefix}_API_KEY"),
+            }
+        
+        # 只配置真正使用的 Agent
+        config_data = {
+            "file_path": "env://",  # 标记为从环境变量加载
+            "mcp_config_file": str(PACKAGE_DIR / "mcp.json"),  # 占位符，实际不使用
+            "design_agent": {
+                **get_llm_config("DESIGN_AGENT"),
+                "is_multimodal": os.getenv("DESIGN_AGENT_MULTIMODAL", "true").lower() == "true",
+            },
+            # 以下是 DeepPresenter 要求的必需字段，但实际不使用，使用 design_agent 配置作为 fallback
+            "research_agent": get_llm_config("DESIGN_AGENT"),  # fallback 到 design_agent
+            "long_context_model": {
+                **get_llm_config("DESIGN_AGENT"),
+                "fallback_base_url": os.getenv("DESIGN_AGENT_BASE_URL") or os.getenv("PPTAGENT_API_BASE"),
+                "fallback_model": os.getenv("DESIGN_AGENT_MODEL") or os.getenv("PPTAGENT_MODEL"),
+                "fallback_api_key": os.getenv("DESIGN_AGENT_API_KEY") or os.getenv("PPTAGENT_API_KEY"),
+            },
+            "vision_model": {
+                **get_llm_config("DESIGN_AGENT"),
+                "fallback_base_url": os.getenv("DESIGN_AGENT_BASE_URL") or os.getenv("PPTAGENT_API_BASE"),
+                "fallback_model": os.getenv("DESIGN_AGENT_MODEL") or os.getenv("PPTAGENT_MODEL"),
+                "fallback_api_key": os.getenv("DESIGN_AGENT_API_KEY") or os.getenv("PPTAGENT_API_KEY"),
+            },
+            "t2i_model": get_llm_config("DESIGN_AGENT"),  # fallback 到 design_agent
+        }
+        
+        return cls(**config_data)
+    
+    @classmethod
     def load_from_file(cls, config_path: str | None = None) -> "DeepPresenterConfig":
-        """Load configuration from file"""
+        """Load configuration from file (fallback to env if file not exists)"""
         if config_path:
             config_file = Path(config_path)
         else:
             config_file = PACKAGE_DIR / "config.yaml"
 
+        # 如果文件不存在，从环境变量加载
         if not config_file.exists():
-            raise FileNotFoundError(f"Configuration file {config_file} does not exist")
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Config file {config_file} not found, loading from environment variables")
+            return cls.load_from_env()
+        
+        # 从文件加载
         config_data = {}
         with open(config_file, encoding="utf-8") as f:
             config_data = yaml.safe_load(f) or {}

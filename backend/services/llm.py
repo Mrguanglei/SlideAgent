@@ -1,7 +1,7 @@
 """
 PPTAgent LLM 服务模块
 
-提供豆包 API 调用功能
+提供通用 LLM API 调用功能，支持豆包、千问、GLM等所有兼容OpenAI API的模型
 """
 
 import json
@@ -16,18 +16,18 @@ from utils.config import Config
 logger = logging.getLogger(__name__)
 
 
-async def call_doubao_api(messages: list, response_format: dict = None) -> str:
-    """调用豆包 API（非流式）"""
-    if not Config.DOUBAO_API_KEY:
-        raise HTTPException(status_code=500, detail="Doubao API not configured")
+async def call_llm_api(messages: list, response_format: dict = None) -> str:
+    """调用 LLM API（非流式）- 支持豆包、千问、GLM等所有模型"""
+    if not Config.LLM_API_KEY:
+        raise HTTPException(status_code=500, detail="LLM API not configured")
 
     headers = {
-        "Authorization": f"Bearer {Config.DOUBAO_API_KEY}",
+        "Authorization": f"Bearer {Config.LLM_API_KEY}",
         "Content-Type": "application/json"
     }
 
     payload = {
-        "model": Config.DOUBAO_MODEL,
+        "model": Config.LLM_MODEL,
         "messages": messages,
         "temperature": 0.7,
     }
@@ -37,7 +37,7 @@ async def call_doubao_api(messages: list, response_format: dict = None) -> str:
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
-            f"{Config.DOUBAO_BASE_URL}/chat/completions",
+            f"{Config.LLM_BASE_URL}/chat/completions",
             headers=headers,
             json=payload
         )
@@ -46,18 +46,18 @@ async def call_doubao_api(messages: list, response_format: dict = None) -> str:
         return result["choices"][0]["message"]["content"]
 
 
-async def call_doubao_api_stream(messages: list) -> AsyncGenerator[str, None]:
-    """流式调用豆包 API"""
-    if not Config.DOUBAO_API_KEY:
-        raise HTTPException(status_code=500, detail="Doubao API not configured")
+async def call_llm_api_stream(messages: list) -> AsyncGenerator[str, None]:
+    """流式调用 LLM API - 支持豆包、千问、GLM等所有模型"""
+    if not Config.LLM_API_KEY:
+        raise HTTPException(status_code=500, detail="LLM API not configured")
 
     headers = {
-        "Authorization": f"Bearer {Config.DOUBAO_API_KEY}",
+        "Authorization": f"Bearer {Config.LLM_API_KEY}",
         "Content-Type": "application/json"
     }
 
     payload = {
-        "model": Config.DOUBAO_MODEL,
+        "model": Config.LLM_MODEL,
         "messages": messages,
         "temperature": 0.7,
         "stream": True,
@@ -66,7 +66,7 @@ async def call_doubao_api_stream(messages: list) -> AsyncGenerator[str, None]:
     async with httpx.AsyncClient(timeout=120.0) as client:
         async with client.stream(
             "POST",
-            f"{Config.DOUBAO_BASE_URL}/chat/completions",
+            f"{Config.LLM_BASE_URL}/chat/completions",
             headers=headers,
             json=payload
         ) as response:
@@ -84,6 +84,7 @@ async def call_doubao_api_stream(messages: list) -> AsyncGenerator[str, None]:
                         continue
 
 
+
 def clean_json_response(response: str) -> str:
     """清理 LLM 返回的 JSON 响应，移除 markdown 代码块标记"""
     response = response.strip()
@@ -92,7 +93,7 @@ def clean_json_response(response: str) -> str:
     if response.startswith("```"):
         response = response[3:]
     if response.endswith("```"):
-        response = response[:-3]
+        response = response[:-3:]
     return response.strip()
 
 

@@ -47,7 +47,7 @@ from database import crud
 from routers import conversations_router, ppt_router, export_router, knowledge_router
 
 # 导入服务
-from services.llm import call_doubao_api, call_doubao_api_stream
+from services.llm import call_llm_api, call_llm_api_stream
 from services.search import (
     generate_search_queries,
     execute_search,
@@ -208,7 +208,7 @@ async def stream_ppt_generation(
         if not is_ppt_request:
             # 非 PPT 请求，直接对话
             response_text = ""
-            async for chunk in call_doubao_api_stream([
+            async for chunk in call_llm_api_stream([
                 {"role": "system", "content": "你是 SlideAgent，一个专业的 PPT 制作助手。用户似乎没有明确的 PPT 制作需求，请友好地回应并引导用户。"},
                 {"role": "user", "content": instruction}
             ]):
@@ -895,7 +895,7 @@ async def health():
     return {
         "status": "ok",
         "deeppresenter_available": Config.DEEPPRESENTER_AVAILABLE,
-        "doubao_api_configured": Config.DOUBAO_API_KEY is not None,
+        "llm_api_configured": Config.LLM_API_KEY is not None,
         "database_configured": True,
         "timestamp": datetime.now().isoformat()
     }

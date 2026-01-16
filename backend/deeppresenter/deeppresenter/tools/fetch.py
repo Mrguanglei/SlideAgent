@@ -4,7 +4,7 @@ import re
 
 import httpx
 import markdownify
-from appcore import mcp
+from .appcore import mcp
 from playwright.async_api import TimeoutError
 from trafilatura import extract
 

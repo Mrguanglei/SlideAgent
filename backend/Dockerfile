@@ -19,6 +19,7 @@ RUN set -eux; \
         sed -i 's|http://deb.debian.org|https://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/*.list; \
         sed -i 's|http://security.debian.org|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list.d/*.list; \
     fi
+
 # 系统依赖（带缓存）
 RUN --mount=type=cache,target=/var/cache/apt \
     --mount=type=cache,target=/var/lib/apt \
@@ -32,6 +33,10 @@ RUN --mount=type=cache,target=/var/cache/apt \
     libcairo2-dev libpango1.0-dev libgdk-pixbuf2.0-dev shared-mime-info \
     fonts-liberation fonts-noto-cjk fonts-wqy-zenhei \
     && rm -rf /var/lib/apt/lists/*
+
+# 安装 Node.js
+RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get install -y nodejs
 
 # pip/uv（带缓存）
 RUN --mount=type=cache,target=/root/.cache/pip \
@@ -61,6 +66,9 @@ RUN playwright install chromium && \
     playwright install-deps chromium
 
 COPY . .
+
+# 安装 html2pptx 的 npm 依赖
+RUN cd html2pptx && npm install
 
 ENV HF_HOME=/root/.cache/huggingface \
     HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface/hub \

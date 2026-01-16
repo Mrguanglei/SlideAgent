@@ -3,7 +3,7 @@ import os
 from typing import Any, Literal
 
 import aiohttp
-from appcore import mcp
+from .appcore import mcp
 from fake_useragent import UserAgent
 
 from deeppresenter.utils.constants import MAX_RETRY_INTERVAL, RETRY_TIMES

@@ -2,7 +2,12 @@
 PPTAgent 服务模块
 """
 
-from .llm import call_doubao_api, call_doubao_api_stream, clean_json_response, extract_core_topic
+from .llm import (
+    call_llm_api,
+    call_llm_api_stream,
+    clean_json_response,
+    extract_core_topic
+)
 from .search import (
     tavily_search_standalone,
     generate_search_queries,
@@ -27,8 +32,8 @@ from .share import create_share, get_share, delete_share, get_conversation_share
 
 __all__ = [
     # LLM
-    "call_doubao_api",
-    "call_doubao_api_stream",
+    "call_llm_api",
+    "call_llm_api_stream",
     "clean_json_response",
     "extract_core_topic",
     # Search
