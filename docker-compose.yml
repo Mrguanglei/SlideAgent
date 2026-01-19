@@ -79,6 +79,7 @@ services:
     networks:
       - pptagent-network
     volumes:
+      - ./backend:/app
       - ppt-workspace:/tmp/ppt_workspace
       - /var/run/docker.sock:/var/run/docker.sock
     privileged: true

@@ -111,6 +111,7 @@ async def export_ppt_file(
         # 返回文件下载
         media_type_map = {
             "pdf": "application/pdf",
+            "html": "text/html",
             "png": "application/zip",
             "images": "application/zip",
             "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
@@ -135,7 +136,8 @@ async def get_export_formats():
     return {
         "formats": [
             {"id": "pdf", "name": "PDF 文档", "extension": ".pdf", "description": "适合打印和分享"},
-            {"id": "png", "name": "PNG 图片", "extension": ".zip", "description": "每页导出为独立图片"},
+            {"id": "html", "name": "HTML 网页", "extension": ".html", "description": "可以在浏览器中查看"},
+             # png 移除，因为用户说先不处理图片
             {"id": "pptx", "name": "PowerPoint", "extension": ".pptx", "description": "可在 Office 中编辑"}
         ]
     }

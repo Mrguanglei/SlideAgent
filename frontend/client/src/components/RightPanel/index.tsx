@@ -1,7 +1,9 @@
+
 import { useRef } from "react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import DownloadPopover from "../DownloadPopover";
 import {
   X,
   Download,
@@ -121,7 +123,7 @@ export default function RightPanel({
 
   // 获取当前版本号
   const currentVersion = pptProject?.current_version?.version_number || 1;
-  const versionName = pptProject?.current_version?.version_name || `V${currentVersion}`;
+  const versionName = pptProject?.current_version?.version_name || `V${currentVersion} `;
 
   return (
     <div className="w-[900px] border-l border-border bg-background flex flex-col h-full">
@@ -219,13 +221,12 @@ export default function RightPanel({
                   >
                     <Share2 className="h-4 w-4 text-muted-foreground" />
                   </button>
-                  <button
-                    onClick={onDownload}
-                    className="p-2 hover:bg-muted rounded-lg transition-colors"
-                    title="下载"
-                  >
-                    <Download className="h-4 w-4 text-muted-foreground" />
-                  </button>
+                  {pptProject && (
+                    <DownloadPopover
+                      projectId={pptProject.id}
+                      title={pptProject.title}
+                    />
+                  )}
                   <button
                     onClick={onPlay}
                     className="p-2 hover:bg-muted rounded-lg transition-colors"

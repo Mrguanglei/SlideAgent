@@ -8,7 +8,7 @@
  */
 
 import { useState } from "react";
-import { X, FileText, Image, FileSliders, Loader2, Download } from "lucide-react";
+import { X, FileText, FileSliders, Loader2, Download, Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface DownloadModalProps {
@@ -36,11 +36,11 @@ const EXPORT_FORMATS: ExportFormat[] = [
     extension: ".pdf"
   },
   {
-    id: "png",
-    name: "PNG 图片",
-    description: "每页导出为独立图片，打包下载",
-    icon: <Image className="h-6 w-6" />,
-    extension: ".zip"
+    id: "html",
+    name: "HTML 网页",
+    description: "可在浏览器中直接播放，支持动画",
+    icon: <Globe className="h-6 w-6" />,
+    extension: ".html"
   },
   {
     id: "pptx",
@@ -117,11 +117,11 @@ export default function DownloadModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* 背景遮罩 */}
-      <div 
+      <div
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
         onClick={onClose}
       />
-      
+
       {/* 弹窗内容 */}
       <div className="relative bg-background rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
         {/* 头部 */}
@@ -138,7 +138,7 @@ export default function DownloadModal({
         {/* 格式选择 */}
         <div className="p-6 space-y-3">
           <p className="text-sm text-muted-foreground mb-4">选择导出格式</p>
-          
+
           {EXPORT_FORMATS.map((format) => (
             <button
               key={format.id}
