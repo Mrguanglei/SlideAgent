@@ -309,12 +309,96 @@ def insert_page(
     """
     插入一页HTML幻灯片。
 
+    ⚠️ **HTML 生成规范（必须严格遵守）**
+    
+    为了确保导出时样式不丢失，你生成的 HTML 必须遵守以下规范：
+    
+    ### 1. 样式定义规范
+    
+    ✅ **正确做法**：
+    ```html
+    <head>
+        <style>
+            .my-class {
+                color: #1284BA;
+                font-size: 24px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="my-class">内容</div>
+    </body>
+    ```
+    
+    ❌ **错误做法**：
+    ```html
+    <!-- 不要使用 Tailwind utility classes 而不加载 Tailwind CSS -->
+    <div class="flex items-center justify-between">内容</div>
+    
+    <!-- 不要使用动态脚本加载 CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    ```
+    
+    ### 2. 字体加载规范
+    
+    ✅ **正确做法**：
+    ```html
+    <!-- 使用 <link> 加载字体 -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <!-- 提供备选字体 -->
+    <style>
+        body {
+            font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+        }
+    </style>
+    ```
+    
+    ### 3. 尺寸规范
+    
+    ✅ **必须使用固定尺寸**：
+    ```css
+    body {
+        width: 1280px;
+        height: 720px;
+    }
+    ```
+    
+    ### 4. 颜色规范
+    
+    ✅ **使用 HEX 颜色代码**：
+    ```css
+    .element {
+        color: #1284BA;
+        background-color: #FEFEFE;
+    }
+    ```
+    
+    ❌ **不要使用 rgba（PPTX 不支持）**：
+    ```css
+    .element {
+        color: rgba(18, 132, 186, 0.8);  /* 不推荐 */
+    }
+    ```
+    
+    ### 5. 布局规范
+    
+    ✅ **推荐使用**：
+    - 绝对定位（position: absolute）
+    - Flexbox（display: flex）
+    
+    ⚠️ **谨慎使用**：
+    - Grid（display: grid）- PPTX 转换可能有问题
+
+    ---
+
     Args:
         index (int): 插入位置的页码（从1开始）
         html (str): 完整的HTML代码，必须包含 <!DOCTYPE html>、<head> 和 <body>
                    - 必须设置固定尺寸（1280px × 720px）
-                   - 必须包含完整的样式定义
+                   - 必须在 <style> 标签中定义所有样式
                    - 图片路径必须是绝对路径或有效的URL
+                   - 必须符合上述 HTML 生成规范
         action_description (str): 对这一页内容的简要描述
 
     Returns:

@@ -34,11 +34,8 @@ RUN --mount=type=cache,target=/var/cache/apt \
     fonts-liberation fonts-noto-cjk fonts-wqy-zenhei \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 Node.js
-RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
-    && apt-get install -y nodejs
-
 # pip/uv（带缓存）
+# 注意：已移除 Node.js 相关依赖，PPTX 生成现在使用纯 Python 方案
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip setuptools wheel \
     && pip install uv -i https://pypi.tuna.tsinghua.edu.cn/simple
@@ -58,8 +55,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 RUN --mount=type=cache,target=/root/.cache/pip \
     cd deeppresenter && pip install -e . -i https://pypi.tuna.tsinghua.edu.cn/simple
 
+# 安装 python-pptx（PPTX 生成）和 requests（图片下载）
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install python-pptx -i https://pypi.tuna.tsinghua.edu.cn/simple
+    pip install python-pptx requests -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 安装 Playwright 浏览器
 RUN playwright install chromium && \
@@ -67,8 +65,8 @@ RUN playwright install chromium && \
 
 COPY . .
 
-# 安装 html2pptx 的 npm 依赖
-RUN cd html2pptx && npm install
+# 注意：已移除 html2pptx npm 依赖安装步骤
+# PPTX 生成现在使用纯 Python 方案（html_parser.py + pptx_generator.py）
 
 ENV HF_HOME=/root/.cache/huggingface \
     HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface/hub \

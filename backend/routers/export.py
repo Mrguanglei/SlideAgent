@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.connection import get_db
 from database import crud
-from services.export import export_ppt
+from services.export import export_ppt, pre_export_check, generate_export_report
 from services.share import create_share, get_share, delete_share, get_conversation_shares
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,14 @@ class ExportRequest(BaseModel):
     project_id: int
     version_id: Optional[int] = None  # 不指定则使用最新版本
     format: str  # pdf, png, pptx
+
+
+class ExportReportRequest(BaseModel):
+    """导出报告请求"""
+    project_id: int
+    version_id: Optional[int] = None
+    format: str
+    output_path: str
 
 
 class ShareRequest(BaseModel):
@@ -131,6 +139,135 @@ async def get_export_formats():
             {"id": "pptx", "name": "PowerPoint", "extension": ".pptx", "description": "可在 Office 中编辑"}
         ]
     }
+
+
+@router.post("/export/pre-check")
+async def api_pre_export_check(
+    request: ExportRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    导出前预检
+    
+    检查 HTML 是否符合导出要求，提前发现潜在问题。
+    
+    返回：
+    - passed: 是否通过验证
+    - issues: 严重问题列表
+    - warnings: 警告信息列表
+    - external_resources: 外部资源列表
+    """
+    try:
+        # 获取项目
+        project = await crud.get_ppt_project(db, request.project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="PPT project not found")
+        
+        # 获取版本
+        if request.version_id:
+            versions = await crud.get_ppt_versions(db, request.project_id)
+            version = next((v for v in versions if v.id == request.version_id), None)
+            if not version:
+                raise HTTPException(status_code=404, detail="PPT version not found")
+        else:
+            version = await crud.get_latest_ppt_version(db, request.project_id)
+            if not version:
+                raise HTTPException(status_code=404, detail="No version found")
+        
+        # 获取幻灯片
+        slides = await crud.get_ppt_slides(db, version.id)
+        if not slides:
+            raise HTTPException(status_code=404, detail="No slides found")
+        
+        # 提取 HTML 内容
+        slides_html = [slide.html_content for slide in sorted(slides, key=lambda s: s.page_number)]
+        
+        # 执行预检
+        result = await pre_export_check(slides_html)
+        
+        return {
+            "success": True,
+            "result": result
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Pre-export check failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Pre-export check failed: {str(e)}")
+
+
+class ExportReportRequest(BaseModel):
+    """导出报告请求"""
+    project_id: int
+    version_id: Optional[int] = None
+    format: str
+    output_path: str
+
+
+@router.post("/export/report")
+async def api_export_report(
+    request: ExportReportRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    获取导出质量报告
+    
+    在导出后调用，评估导出质量。
+    
+    返回：
+    - quality_score: 质量分数 (0-1)
+    - issues: 严重问题列表
+    - warnings: 警告信息列表
+    - file_size: 文件大小
+    - slides_count: 幻灯片数量
+    """
+    try:
+        # 获取项目
+        project = await crud.get_ppt_project(db, request.project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="PPT project not found")
+        
+        # 获取版本
+        if request.version_id:
+            versions = await crud.get_ppt_versions(db, request.project_id)
+            version = next((v for v in versions if v.id == request.version_id), None)
+            if not version:
+                raise HTTPException(status_code=404, detail="PPT version not found")
+        else:
+            version = await crud.get_latest_ppt_version(db, request.project_id)
+            if not version:
+                raise HTTPException(status_code=404, detail="No version found")
+        
+        # 获取幻灯片
+        slides = await crud.get_ppt_slides(db, version.id)
+        if not slides:
+            raise HTTPException(status_code=404, detail="No slides found")
+        
+        # 提取 HTML 内容
+        slides_html = [slide.html_content for slide in sorted(slides, key=lambda s: s.page_number)]
+        
+        # 检查输出文件是否存在
+        if not os.path.exists(request.output_path):
+            raise HTTPException(status_code=404, detail="Output file not found")
+        
+        # 生成报告
+        report = await generate_export_report(
+            slides_html=slides_html,
+            export_format=request.format,
+            output_path=request.output_path
+        )
+        
+        return {
+            "success": True,
+            "report": report
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Generate export report failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Generate export report failed: {str(e)}")
 
 
 # ==================== 分享 API ====================
