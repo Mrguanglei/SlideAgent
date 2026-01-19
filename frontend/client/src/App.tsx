@@ -6,6 +6,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import ShareView from "./pages/ShareView";
+import PPTPlayer from "./pages/PPTPlayer";
 import Knowledge from "./pages/Knowledge";
 
 function Router() {
@@ -16,6 +17,7 @@ function Router() {
       <Route path="/chat/:conversationId" component={Home} />
       <Route path="/knowledge-base" component={Knowledge} />
       <Route path="/share/:shareId" component={ShareView} />
+      <Route path="/play/:id" component={PPTPlayer} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />
     </Switch>

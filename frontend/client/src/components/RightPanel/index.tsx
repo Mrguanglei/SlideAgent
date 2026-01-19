@@ -262,7 +262,7 @@ export default function RightPanel({
             pptPreviewScrollRef={pptPreviewScrollRef as any}
             pptCodeScrollRef={pptCodeScrollRef as any}
             targetSlideIndex={targetSlideIndex}
-            editablePPTRef={editablePPTRef}
+            editablePPTRef={editablePPTRef as React.RefObject<EditablePPTPreviewRef>}
             isEditMode={isEditMode}
             onSaveSlide={onSaveSlide}
             pptProject={pptProject}

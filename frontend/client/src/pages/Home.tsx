@@ -910,8 +910,10 @@ export default function Home() {
   };
 
   const handlePlay = () => {
-    // TODO: 实现播放功能
-    console.log("Play PPT");
+    if (pptProject) {
+      // 在新窗口打开播放页面
+      window.open(`/play/${pptProject.id}`, "_blank");
+    }
   };
 
   const handleFullscreen = () => {
