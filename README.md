@@ -22,10 +22,10 @@
 
 ## ✨ TODO
 
+- [x] **Content Editing** - Directly edit text content on preview page
 - [x] **Download Export** - Support export to PDF, PNG (ZIP), PPTX formats，Note: The style will be lost. Processing in progress.
 - [ ] **Conversational Editing** - Continuously modify and optimize PPT content through dialogue
 - [ ] **Online Preview** - Real-time PPT preview in browser
-- [ ] **Content Editing** - Directly edit text content on preview page
 - [ ] **Multi-version Management** - Save historical versions, rollback and compare anytime
 - [ ] **State Management** - Agent task status global persistence design
 
