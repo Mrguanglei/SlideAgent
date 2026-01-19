@@ -174,9 +174,24 @@ async function startServer() {
         res.setHeader(key, value);
       });
 
-      // 转发响应体
-      const data = await response.text();
-      res.status(response.status).send(data);
+      // 检查响应类型，对于二进制文件使用 arrayBuffer
+      const contentType = response.headers.get("content-type") || "";
+      const isBinaryResponse = 
+        contentType.includes("application/octet-stream") ||
+        contentType.includes("application/pdf") ||
+        contentType.includes("application/zip") ||
+        contentType.includes("application/vnd.openxmlformats") ||  // PPTX, DOCX, XLSX
+        contentType.includes("image/");
+
+      if (isBinaryResponse) {
+        // 二进制文件：使用 arrayBuffer 保持原始字节
+        const buffer = await response.arrayBuffer();
+        res.status(response.status).send(Buffer.from(buffer));
+      } else {
+        // 文本响应：使用 text
+        const data = await response.text();
+        res.status(response.status).send(data);
+      }
     } catch (error) {
       console.error("[Proxy] API error:", error);
       res.status(500).json({ error: "Failed to connect to backend" });

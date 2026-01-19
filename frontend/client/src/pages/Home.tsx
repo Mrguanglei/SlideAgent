@@ -56,67 +56,67 @@ import {
 
 // 模板数据 - 智谱清言风格（带预览图）
 const TEMPLATES: Template[] = [
-  { 
-    id: 1, 
-    title: "AI医疗创新", 
-    category: "科技", 
-    color: "from-white to-gray-50", 
+  {
+    id: 1,
+    title: "AI医疗创新",
+    category: "科技",
+    color: "from-white to-gray-50",
     subtitle: "AI-DRIVEN HEALTHCARE INNOVATION",
     preview: "https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?w=400&h=225&fit=crop"
   },
-  { 
-    id: 2, 
-    title: "中国医疗创新", 
-    category: "商务", 
-    color: "from-blue-50 to-blue-100", 
+  {
+    id: 2,
+    title: "中国医疗创新",
+    category: "商务",
+    color: "from-blue-50 to-blue-100",
     subtitle: "中国医疗创新：未来的挑战",
     preview: "https://images.unsplash.com/photo-1551076805-e1869033e561?w=400&h=225&fit=crop"
   },
-  { 
-    id: 3, 
-    title: "战略规划", 
-    category: "商务", 
-    color: "from-purple-600 to-purple-700", 
+  {
+    id: 3,
+    title: "战略规划",
+    category: "商务",
+    color: "from-purple-600 to-purple-700",
     subtitle: "STRATEGIC EXCELLENCE",
     preview: "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=400&h=225&fit=crop"
   },
-  { 
-    id: 4, 
-    title: "商业转型", 
-    category: "商务", 
-    color: "from-slate-700 to-slate-800", 
+  {
+    id: 4,
+    title: "商业转型",
+    category: "商务",
+    color: "from-slate-700 to-slate-800",
     subtitle: "Business Transformation Strategy",
     preview: "https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=400&h=225&fit=crop"
   },
-  { 
-    id: 5, 
-    title: "律师事务所", 
-    category: "商务", 
-    color: "from-amber-700 to-amber-800", 
+  {
+    id: 5,
+    title: "律师事务所",
+    category: "商务",
+    color: "from-amber-700 to-amber-800",
     subtitle: "LAWYER",
     preview: "https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=400&h=225&fit=crop"
   },
-  { 
-    id: 6, 
-    title: "企业卓越", 
-    category: "商务", 
-    color: "from-orange-500 to-orange-600", 
+  {
+    id: 6,
+    title: "企业卓越",
+    category: "商务",
+    color: "from-orange-500 to-orange-600",
     subtitle: "CORPORATE EXCELLENCE",
     preview: "https://images.unsplash.com/photo-1497366216548-37526070297c?w=400&h=225&fit=crop"
   },
-  { 
-    id: 7, 
-    title: "研究报告", 
-    category: "科技", 
-    color: "from-gray-100 to-gray-200", 
+  {
+    id: 7,
+    title: "研究报告",
+    category: "科技",
+    color: "from-gray-100 to-gray-200",
     subtitle: "ADVANCED RESEARCH SYMPOSIUM",
     preview: "https://images.unsplash.com/photo-1532094349884-543bc11b234d?w=400&h=225&fit=crop"
   },
-  { 
-    id: 8, 
-    title: "酒店介绍", 
-    category: "创意", 
-    color: "from-stone-600 to-stone-700", 
+  {
+    id: 8,
+    title: "酒店介绍",
+    category: "创意",
+    color: "from-stone-600 to-stone-700",
     subtitle: "The Grand Meridian",
     preview: "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=400&h=225&fit=crop"
   },
@@ -133,36 +133,36 @@ export default function Home() {
 
   // 页面模式
   const [mode, setMode] = useState<"home" | "chat">("home");
-  
+
   // 侧边栏状态
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<number | null>(null);
   const [currentConversationUuid, setCurrentConversationUuid] = useState<string | null>(null);
-  
+
   // 聊天状态
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [currentTopic, setCurrentTopic] = useState("");
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  
+
   // 工具调用状态
   const [autoConfirmCountdown, setAutoConfirmCountdown] = useState<number | null>(null);
   const autoConfirmTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [pendingToolCallId, setPendingToolCallId] = useState<string>("");
   const [isConfirming, setIsConfirming] = useState(false);
-  
+
   // 任务规划状态
   const [taskPlan, setTaskPlan] = useState<TaskPlan | null>(null);
   const [taskPlanStreaming, setTaskPlanStreaming] = useState(false);
-  
+
   // 搜索状态
   const [searchRounds, setSearchRounds] = useState<SearchRound[]>([]);
   const [currentSearchRound, setCurrentSearchRound] = useState(1);
   const [deepThinking, setDeepThinking] = useState("");
   const [deepThinkingStreaming, setDeepThinkingStreaming] = useState(false);
-  
+
   // PPT 状态
   const [pptOutline, setPptOutline] = useState("");
   const [pptOutlineStreaming, setPptOutlineStreaming] = useState(false);
@@ -171,16 +171,16 @@ export default function Home() {
   const [pptProject, setPptProject] = useState<PPTProject | null>(null);
   const [pptProjects, setPptProjects] = useState<PPTProject[]>([]);
   const [isEditMode, setIsEditMode] = useState(false);
-  
+
   // 右侧面板状态
   const [showRightPanel, setShowRightPanel] = useState(false);
   const [rightPanelType, setRightPanelType] = useState<RightPanelType>(null);
   const [targetSlideIndex, setTargetSlideIndex] = useState<number | undefined>(undefined);
-  
+
   // 模板状态
   const [selectedCategory, setSelectedCategory] = useState<TemplateCategory>("全部");
   const [isPptMode, setIsPptMode] = useState(true);
-  
+
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -221,7 +221,7 @@ export default function Home() {
   }, [messages]);
 
   // ==================== API 调用 ====================
-  
+
   const loadConversations = async () => {
     try {
       const data = await getConversations();
@@ -264,7 +264,7 @@ export default function Home() {
         }));
         setMessages(restoredMessages);
       }
-      
+
       // 恢复 PPT 项目
       if (data.ppt_project) {
         const project = data.ppt_project;
@@ -289,7 +289,7 @@ export default function Home() {
         // 如果没有 PPT 项目，使用对话标题
         setCurrentTopic(data.conversation.title);
       }
-      
+
       // 从工具调用中提取任务规划和搜索数据
       if (data.messages) {
         // 提取任务规划
@@ -305,7 +305,7 @@ export default function Home() {
             }
           }
         }
-        
+
         // 提取搜索轮次
         const extractedRounds: SearchRound[] = [];
         for (const msg of data.messages) {
@@ -334,7 +334,7 @@ export default function Home() {
           setSearchRounds(extractedRounds);
           setCurrentSearchRound(extractedRounds[extractedRounds.length - 1].round);
         }
-        
+
         // 提取 PPT 大纲
         for (const msg of data.messages) {
           if (msg.tool_calls) {
@@ -346,7 +346,7 @@ export default function Home() {
           }
         }
       }
-      
+
       setMode("chat");
     } catch (error) {
       console.error("Failed to load conversation:", error);
@@ -354,13 +354,13 @@ export default function Home() {
   };
 
   // ==================== 事件处理 ====================
-  
+
   const handleNewChat = () => {
     // 取消正在进行的请求
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
-    
+
     // 重置所有状态
     setCurrentConversationId(null);
     setCurrentConversationUuid(null);
@@ -381,7 +381,7 @@ export default function Home() {
     setShowRightPanel(false);
     setRightPanelType(null);
     setAutoConfirmCountdown(null);
-    
+
     if (autoConfirmTimerRef.current) {
       clearInterval(autoConfirmTimerRef.current);
     }
@@ -401,7 +401,7 @@ export default function Home() {
     try {
       await deleteConversation(id);
       setConversations(prev => prev.filter(c => c.id !== id));
-      
+
       if (currentConversationId === id) {
         handleNewChat();
       }
@@ -774,7 +774,7 @@ export default function Home() {
 
   const startAutoConfirmCountdown = () => {
     setAutoConfirmCountdown(30);
-    
+
     if (autoConfirmTimerRef.current) {
       clearInterval(autoConfirmTimerRef.current);
     }
@@ -867,7 +867,7 @@ export default function Home() {
 
   const handleSelectProject = (project: PPTProject) => {
     setPptProject(project);
-    
+
     // 加载 PPT HTML 代码
     if (project.versions && project.versions.length > 0) {
       const latestVersion = project.versions[project.versions.length - 1];
@@ -879,7 +879,7 @@ export default function Home() {
         setPptHtmlCode(htmlCode);
       }
     }
-    
+
     setCurrentTopic(project.title);
     setRightPanelType("ppt_preview");
   };
@@ -919,13 +919,57 @@ export default function Home() {
     console.log("Fullscreen PPT");
   };
 
+  const handleSaveSlide = async (slideId: number, htmlContent: string) => {
+    try {
+      // 调用 API 更新幻灯片
+      const { updateSlide } = await import("@/lib/api");
+      await updateSlide(slideId, htmlContent);
+
+      // 更新本地 pptProject 数据
+      setPptProject(prev => {
+        if (!prev) return prev;
+
+        // 修复：数据在 project.slides，不是 current_version.slides
+        // 使用 any 绕过类型检查，因为后端返回结构与前端类型定义不完全一致
+        const slides = (prev as any).slides;
+        if (!slides) return prev;
+
+        const updatedSlides = slides.map((slide: any) =>
+          slide.id === slideId
+            ? { ...slide, html_content: htmlContent, updated_at: new Date().toISOString() }
+            : slide
+        );
+
+        // 关键：在这里同步更新 pptHtmlCode，确保预览立即刷新
+        // 这样可以确保使用的是刚刚更新的 slides 数据，而不是外部可能过时的 state
+        const htmlCode = updatedSlides
+          .sort((a: any, b: any) => a.page_number - b.page_number)
+          .map((slide: any) => slide.html_content)
+          .join("\n");
+        setPptHtmlCode(htmlCode);
+
+        console.log('✅ Updated pptProject and pptHtmlCode (atomic update)');
+
+        return {
+          ...prev,
+          slides: updatedSlides,
+        } as any;
+      });
+
+      console.log(`Slide ${slideId} saved successfully`);
+    } catch (error) {
+      console.error("Failed to save slide:", error);
+      throw error;
+    }
+  };
+
   // 过滤模板
   const filteredTemplates = TEMPLATES.filter(
     t => selectedCategory === "全部" || t.category === selectedCategory
   );
 
   // ==================== 渲染 ====================
-  
+
   return (
     <div className="h-screen flex bg-background">
       {/* 左侧边栏 - 历史对话 */}
@@ -970,14 +1014,14 @@ export default function Home() {
               <div className="min-h-full flex flex-col">
                 {/* 上半部分：欢迎语 + 输入框 */}
                 <div className="flex-shrink-0 pt-16 pb-12 px-4 ">
-                  
-                  <div className="max-w-3xl mx-auto mt-26">    
+
+                  <div className="max-w-3xl mx-auto mt-26">
                     {/* 欢迎语 */}
                     <h1 className="text-3xl font-bold mb-8 text-center flex items-center justify-center gap-2">
                       <span>👋</span>
                       <span>嗨，今天有什么我可以帮你的吗？</span>
                     </h1>
-                    
+
                     {/* 大输入框 - 智谱清言风格 */}
                     <div className="border border-border rounded-2xl bg-background shadow-sm overflow-hidden">
                       {/* 输入区域 */}
@@ -995,7 +1039,7 @@ export default function Home() {
                         className="w-full px-5 pt-5 pb-3 bg-transparent resize-none focus:outline-none min-h-[80px] max-h-[200px] text-base"
                         rows={2}
                       />
-                      
+
                       {/* 底部工具栏 */}
                       <div className="flex items-center justify-between px-4 py-3 border-t border-border/50">
                         {/* 左侧按钮 */}
@@ -1020,7 +1064,7 @@ export default function Home() {
                             </div>
                           )}
                         </div>
-                        
+
                         {/* 右侧发送按钮 */}
                         <button
                           onClick={handleSendMessage}
@@ -1068,8 +1112,8 @@ export default function Home() {
                         >
                           {/* 背景图片 */}
                           {template.preview ? (
-                            <img 
-                              src={template.preview} 
+                            <img
+                              src={template.preview}
                               alt={template.title}
                               className="absolute inset-0 w-full h-full object-cover"
                             />
@@ -1079,16 +1123,16 @@ export default function Home() {
                               template.color
                             )} />
                           )}
-                          
+
                           {/* 渐变遮罩 */}
                           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
-                          
+
                           {/* 内容 */}
                           <div className="absolute inset-0 p-4 flex flex-col justify-end text-white">
                             <div className="text-xs opacity-90 mb-1 uppercase tracking-wide">{template.subtitle}</div>
                             <h3 className="font-bold text-lg leading-tight">{template.title}</h3>
                           </div>
-                          
+
                           {/* 悬浮效果 */}
                           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
                         </button>
@@ -1175,62 +1219,62 @@ export default function Home() {
 
         {/* 输入框 - 只在聊天模式下显示 */}
         {mode === "chat" && (
-        <div className="p-4 border-t border-border bg-background shrink-0">
-          <div className="max-w-3xl mx-auto">
-            <div className="relative">
-              <textarea
-                ref={inputRef}
-                value={inputValue}
-                onChange={e => setInputValue(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSendMessage();
-                  }
-                }}
-                placeholder="想调整内容、样式或风格等吗，直接告诉我吧"
-                className="w-full px-4 py-3 pr-24 rounded-xl border border-border bg-background resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 min-h-[52px] max-h-[200px]"
-                rows={1}
-              />
+          <div className="p-4 border-t border-border bg-background shrink-0">
+            <div className="max-w-3xl mx-auto">
+              <div className="relative">
+                <textarea
+                  ref={inputRef}
+                  value={inputValue}
+                  onChange={e => setInputValue(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSendMessage();
+                    }
+                  }}
+                  placeholder="想调整内容、样式或风格等吗，直接告诉我吧"
+                  className="w-full px-4 py-3 pr-24 rounded-xl border border-border bg-background resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 min-h-[52px] max-h-[200px]"
+                  rows={1}
+                />
 
-              <div className="absolute right-2 bottom-2 flex items-center gap-1">
-                <button className="p-2 hover:bg-muted rounded-lg transition-colors">
-                  <Paperclip className="h-4 w-4 text-muted-foreground" />
-                </button>
-                <button className="p-2 hover:bg-muted rounded-lg transition-colors">
-                  <Settings className="h-4 w-4 text-muted-foreground" />
-                </button>
+                <div className="absolute right-2 bottom-2 flex items-center gap-1">
+                  <button className="p-2 hover:bg-muted rounded-lg transition-colors">
+                    <Paperclip className="h-4 w-4 text-muted-foreground" />
+                  </button>
+                  <button className="p-2 hover:bg-muted rounded-lg transition-colors">
+                    <Settings className="h-4 w-4 text-muted-foreground" />
+                  </button>
 
-                {/* PPT 模式标签 */}
-                {isPptMode && (
-                  <div className="flex items-center gap-1 px-2 py-1 bg-primary/10 rounded-lg">
-                    <FileSliders className="h-3.5 w-3.5 text-primary" />
-                    <span className="text-xs text-primary font-medium">PPT模式</span>
-                    <button
-                      onClick={() => setIsPptMode(false)}
-                      className="ml-1 hover:bg-primary/20 rounded p-0.5"
-                    >
-                      <X className="h-3 w-3 text-primary" />
-                    </button>
-                  </div>
-                )}
-
-                <button
-                  onClick={handleSendMessage}
-                  disabled={!inputValue.trim() || isLoading}
-                  className={cn(
-                    "p-2 rounded-lg transition-colors",
-                    inputValue.trim() && !isLoading
-                      ? "bg-primary text-white hover:bg-primary/90"
-                      : "bg-muted text-muted-foreground"
+                  {/* PPT 模式标签 */}
+                  {isPptMode && (
+                    <div className="flex items-center gap-1 px-2 py-1 bg-primary/10 rounded-lg">
+                      <FileSliders className="h-3.5 w-3.5 text-primary" />
+                      <span className="text-xs text-primary font-medium">PPT模式</span>
+                      <button
+                        onClick={() => setIsPptMode(false)}
+                        className="ml-1 hover:bg-primary/20 rounded p-0.5"
+                      >
+                        <X className="h-3 w-3 text-primary" />
+                      </button>
+                    </div>
                   )}
-                >
-                  <Send className="h-4 w-4" />
-                </button>
+
+                  <button
+                    onClick={handleSendMessage}
+                    disabled={!inputValue.trim() || isLoading}
+                    className={cn(
+                      "p-2 rounded-lg transition-colors",
+                      inputValue.trim() && !isLoading
+                        ? "bg-primary text-white hover:bg-primary/90"
+                        : "bg-muted text-muted-foreground"
+                    )}
+                  >
+                    <Send className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
         )}
       </div>
 
@@ -1263,6 +1307,7 @@ export default function Home() {
         onShare={handleShare}
         onPlay={handlePlay}
         onFullscreen={handleFullscreen}
+        onSaveSlide={handleSaveSlide}
       />
 
       {/* 下载弹窗 */}

@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   X,
@@ -22,6 +23,7 @@ import type {
   SearchRound,
   PPTProject,
 } from "@/types";
+import type { EditablePPTPreviewRef } from "./EditablePPTPreview";
 
 interface RightPanelProps {
   // 面板状态
@@ -39,6 +41,7 @@ interface RightPanelProps {
   isEditMode: boolean;
   setIsEditMode: (edit: boolean) => void;
   targetSlideIndex?: number; // 目标幻灯片索引
+  onSaveSlide?: (slideId: number, htmlContent: string) => Promise<void>; // 保存幻灯片回调
 
   // 任务规划
   taskPlan: TaskPlan | null;
@@ -79,6 +82,7 @@ export default function RightPanel({
   isEditMode,
   setIsEditMode,
   targetSlideIndex,
+  onSaveSlide,
   taskPlan,
   taskPlanStreaming,
   searchRounds,
@@ -99,6 +103,19 @@ export default function RightPanel({
   const pptOutlineContentRef = useRef<HTMLDivElement>(null);
   const pptPreviewScrollRef = useRef<HTMLDivElement>(null);
   const pptCodeScrollRef = useRef<HTMLDivElement>(null);
+  const editablePPTRef = useRef<EditablePPTPreviewRef>(null);
+
+  // 保存编辑
+  const handleSaveEdit = async () => {
+    try {
+      await editablePPTRef.current?.saveAllSlides();
+      toast.success("保存成功！");
+      setIsEditMode(false);
+    } catch (error) {
+      console.error('保存失败:', error);
+      toast.error("保存失败，请重试");
+    }
+  };
 
   if (!showRightPanel) return null;
 
@@ -180,10 +197,7 @@ export default function RightPanel({
                     取消
                   </button>
                   <button
-                    onClick={() => {
-                      // TODO: 保存编辑
-                      setIsEditMode(false);
-                    }}
+                    onClick={handleSaveEdit}
                     className="px-3 py-1.5 text-sm bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
                   >
                     保存
@@ -248,6 +262,10 @@ export default function RightPanel({
             pptPreviewScrollRef={pptPreviewScrollRef as any}
             pptCodeScrollRef={pptCodeScrollRef as any}
             targetSlideIndex={targetSlideIndex}
+            editablePPTRef={editablePPTRef}
+            isEditMode={isEditMode}
+            onSaveSlide={onSaveSlide}
+            pptProject={pptProject}
           />
         )}
 
