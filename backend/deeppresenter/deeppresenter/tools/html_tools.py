@@ -155,10 +155,13 @@ def think(thought_content: str) -> str:
     ### 四、HTML/CSS技术实现要点
 
     #### 页面尺寸规范（严格遵守）
-    - **封面页**：width: 1280px; height: 720px; （固定高度）
-    - **内容页**：width: 1280px; min-height: 720px; （最小高度）
-    - **重要**：内容必须尽量控制在720px高度内，避免溢出
+    - **所有页面**：width: 1280px; height: 720px; （固定高度，不要用min-height）
+    - **重要**：所有内容必须严格控制在720px高度内，避免溢出
     - **重要**：使用 flex 布局确保内容填充页面高度
+    - **页面边距要求**：
+      - 标题栏 padding-top: 至少 30-40px（避免紧贴顶部）
+      - 内容区域 padding-bottom: 至少 40px（避免底部被遮盖）
+      - 左右边距: 至少 50-60px
 
     #### 布局技术选择
     - **主容器**：使用 display: flex; flex-direction: column;
@@ -178,11 +181,17 @@ def think(thought_content: str) -> str:
     - **强调色**：极少使用（≤5%），仅用于高亮关键点
 
     #### 字体大小规范
-    - **封面标题**：50-70px
-    - **封面副标题**：20px
-    - **页面标题**：40px（标题区高度85px）
-    - **主要文本**：24px
-    - **最小文本**：20px
+    - **封面标题**：64-84px, font-weight: 800-900
+    - **封面副标题**：22-28px, font-weight: 300-400
+    - **页面标题**：36-40px（标题栏高度100-120px，含padding）
+    - **主要文本**：20-24px
+    - **最小文本**：18px
+    
+    #### 标题栏布局规范（重要）
+    - **标题栏总高度**：100-120px（包含上下padding）
+    - **标题栏padding**：padding: 35px 60px 25px 60px（上 右 下 左）
+    - **避免标题紧贴顶部**：必须有 padding-top: 30-40px
+    - **内容区域可用高度**：720px - 标题栏(100-120px) - 底部padding(40px) ≈ 560-580px
 
     #### 必须引入的资源
     - Material Icons: <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
@@ -196,10 +205,15 @@ def think(thought_content: str) -> str:
     - 装饰元素使用 position: absolute 定位
 
     #### 内容页技术要点
-    - 标题区：固定高度85px，不添加上 padding
-    - 主内容区：使用 flex-grow: 1 填充剩余空间
-    - 卡片/模块：使用 box-shadow 和 border-radius 增强视觉效果
-    - 图标：必须使用 Material Icons，配合主色或强调色
+    - **标题栏**：高度100-120px，padding: 35px 60px 25px 60px
+    - **主内容区**：padding: 30px 60px 40px 60px，使用 flex 或 grid 布局
+    - **严格限制内容数量**：每页最多4-6个主要元素，避免溢出
+    - **卡片/模块**：
+      - 阴影: box-shadow: 0 4px 6px rgba(0,0,0,0.07), 0 10px 20px rgba(0,0,0,0.1)
+      - 圆角: border-radius: 20-24px
+      - 间距: gap: 24-32px
+    - **图标**：必须使用渐变背景容器（64px容器 + 渐变背景 + box-shadow）
+    - **图表**：高度不超过350-400px，必须设置明确的height属性
 
     ---
 
@@ -360,9 +374,18 @@ def insert_page(
     ```css
     body {
         width: 1280px;
-        height: 720px;
+        height: 720px;  /* 固定高度，不要用 min-height */
+        margin: 0;
+        padding: 0;
     }
     ```
+    
+    ⚠️ **重要**：
+    - 所有页面必须使用 height: 720px（固定高度）
+    - 不要使用 min-height: 720px
+    - 确保标题栏有 padding-top: 30-40px
+    - 确保内容区域有 padding-bottom: 40px
+    - 严格控制内容数量，每页最多4-6个主要元素
     
     ### 4. 颜色规范
     
