@@ -153,31 +153,39 @@ class PPTExporter:
     
     def _merge_slides_html(self, slides_html: List[str]) -> str:
         """
-        合并多个幻灯片的 HTML，直接拼接而不使用 iframe
-        简化版本：不使用 CSS scoping，直接包装每个幻灯片
+        合并多个幻灯片的 HTML，直接内联内容（不使用 iframe）
+
+        注意：Playwright 的 page.pdf() 无法正确渲染 iframe 内容，
+        因此必须将每个幻灯片的内容直接内联到主文档中。
         """
         all_contents = []
-        
+        all_styles = []
+
         for i, slide_html in enumerate(slides_html):
-            # 确保幻灯片有完整的依赖
-            full_slide_html = self._ensure_slide_dependencies(slide_html)
-            
-            # 直接包装每个幻灯片的完整 HTML
+            # 提取 body 内容
+            body_content = self._extract_body_content(slide_html)
+            # 提取 style 内容，并添加作用域前缀避免样式冲突
+            style_content = self._extract_style_content(slide_html)
+
+            # 为每个幻灯片的样式添加作用域
+            scoped_style = self._scope_css(style_content, f"slide-{i+1}")
+            all_styles.append(scoped_style)
+
+            # 包装幻灯片内容
             wrapped_content = f'''
-            <div class="slide-page" id="slide-{i+1}">
-                <iframe 
-                    srcdoc="{full_slide_html.replace('"', '&quot;')}"
-                    style="width: 100%; height: 100%; border: none;"
-                ></iframe>
+            <div class="slide-page slide-{i+1}" id="slide-{i+1}">
+                {body_content}
             </div>
             '''
             all_contents.append(wrapped_content)
-        
+
         # 合并成最终的 HTML
         merged_html = f'''<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <style>
         /* 全局样式 */
         * {{
@@ -187,6 +195,7 @@ class PPTExporter:
         }}
         body {{
             background: white;
+            font-family: 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
         }}
         .slide-page {{
             width: {self.slide_width}px;
@@ -198,74 +207,92 @@ class PPTExporter:
         .slide-page:last-child {{
             page-break-after: auto;
         }}
+        /* 幻灯片样式 */
+        {chr(10).join(all_styles)}
     </style>
 </head>
 <body>
     {''.join(all_contents)}
 </body>
 </html>'''
-        
+
         return merged_html
         
     async def export_to_pdf(
-        self, 
-        slides_html: List[str], 
+        self,
+        slides_html: List[str],
         title: str = "presentation"
     ) -> Tuple[str, str]:
         """
-        导出 PDF - 直接拼接 HTML，不使用 iframe
-        
+        导出 PDF - 截图方案（100% 保留样式）
+
         方案：
-        1. 静态化所有幻灯片（Canvas 转图片）
-        2. 解析每个幻灯片的 HTML，提取样式和内容
-        3. 直接拼接所有幻灯片的内容
-        4. 使用 Playwright 渲染并打印为 PDF
+        1. 逐个渲染每个幻灯片并截图
+        2. 将所有截图拼成一个 PDF
+
+        这是最可靠的方案，因为是像素级截图，不会丢失任何样式。
         """
+        import base64
+
         try:
             filename = f"{title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
             filepath = EXPORT_DIR / filename
-            
-            # 步骤 1：静态化所有幻灯片（将 Canvas 等动态内容转为静态）
-            logger.info(f"Staticizing {len(slides_html)} slides for PDF export...")
-            slides_html = await batch_staticize_html(slides_html, timeout=30)
-            logger.info("All slides staticized")
-            
-            # 步骤 2：合并所有幻灯片的 HTML
-            pdf_html = self._merge_slides_html(slides_html)
-            
+
+            logger.info(f"Exporting {len(slides_html)} slides to PDF using screenshot method...")
+
+            # 收集所有幻灯片的截图（base64）
+            slide_images = []
+
             async with async_playwright() as p:
                 browser = await p.chromium.launch(
                     headless=True,
                     args=['--no-sandbox', '--disable-setuid-sandbox']
                 )
-                
-                page = await browser.new_page()
-                
-                # 加载 HTML
-                await page.set_content(pdf_html, wait_until="domcontentloaded", timeout=120000)
-                
-                # 等待页面渲染完成（增加等待时间确保 iframe 渲染）
-                await page.wait_for_timeout(3000)
-                
-                # 等待所有 iframe 加载完成
-                await page.evaluate("""() => {
-                    return Promise.all(
-                        Array.from(document.querySelectorAll('iframe')).map(iframe => {
-                            return new Promise((resolve) => {
-                                if (iframe.contentDocument && iframe.contentDocument.readyState === 'complete') {
-                                    resolve();
-                                } else {
-                                    iframe.addEventListener('load', resolve);
-                                    setTimeout(resolve, 2000); // 超时保护
-                                }
-                            });
-                        })
-                    );
-                }""")
-                
-                # 再等待一下确保渲染完成
-                await page.wait_for_timeout(2000)
-                
+
+                page = await browser.new_page(
+                    viewport={'width': self.slide_width, 'height': self.slide_height}
+                )
+
+                for i, slide_html in enumerate(slides_html):
+                    logger.info(f"Rendering slide {i+1}/{len(slides_html)}...")
+
+                    # 确保幻灯片有完整的依赖
+                    full_html = self._ensure_slide_dependencies(slide_html)
+
+                    # 加载幻灯片
+                    await page.set_content(full_html, wait_until="networkidle", timeout=60000)
+
+                    # 等待渲染完成
+                    await page.wait_for_timeout(1000)
+
+                    # 等待图片加载
+                    await page.evaluate("""() => {
+                        return Promise.all(
+                            Array.from(document.images)
+                                .filter(img => !img.complete)
+                                .map(img => new Promise(resolve => {
+                                    img.onload = img.onerror = resolve;
+                                }))
+                        );
+                    }""")
+
+                    # 等待字体加载
+                    await page.evaluate("""async () => {
+                        if (document.fonts) await document.fonts.ready;
+                    }""")
+
+                    # 截图
+                    screenshot = await page.screenshot(type='png', full_page=False)
+                    slide_images.append(base64.b64encode(screenshot).decode('utf-8'))
+
+                    logger.info(f"Slide {i+1} captured")
+
+                # 生成包含所有截图的 HTML，然后打印为 PDF
+                pdf_html = self._create_screenshot_pdf_html(slide_images)
+
+                await page.set_content(pdf_html, wait_until="load", timeout=60000)
+                await page.wait_for_timeout(500)
+
                 # 打印 PDF
                 await page.pdf(
                     path=str(filepath),
@@ -275,12 +302,12 @@ class PPTExporter:
                     display_header_footer=False,
                     margin={"top": "0", "right": "0", "bottom": "0", "left": "0"}
                 )
-                
+
                 await browser.close()
-            
+
             logger.info(f"PDF exported: {filepath}")
             return str(filepath), filename
-            
+
         except Exception as e:
             logger.error(f"Failed to export PDF: {e}")
             raise
