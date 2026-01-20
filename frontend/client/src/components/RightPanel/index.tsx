@@ -4,15 +4,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import DownloadPopover from "../DownloadPopover";
-import {
-  X,
-  Download,
-  Share2,
-  Play,
-  Maximize2,
-  Edit3,
-  FolderOpen,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, Maximize2, X, Edit3, Share2, Download, Play } from "lucide-react";
 import PPTPreviewPanel from "./PPTPreviewPanel";
 import TaskPlanPanel from "./TaskPlanPanel";
 import SearchPanel from "./SearchPanel";
@@ -69,6 +61,7 @@ interface RightPanelProps {
   onShare: () => void;
   onPlay: () => void;
   onFullscreen: () => void;
+  isLoading?: boolean;
 }
 
 export default function RightPanel({
@@ -100,6 +93,7 @@ export default function RightPanel({
   onShare,
   onPlay,
   onFullscreen,
+  isLoading = false,
 }: RightPanelProps) {
   const taskPlanContentRef = useRef<HTMLDivElement>(null);
   const pptOutlineContentRef = useRef<HTMLDivElement>(null);
@@ -208,24 +202,41 @@ export default function RightPanel({
               ) : (
                 <>
                   <button
-                    onClick={() => setIsEditMode(true)}
-                    className="p-2 hover:bg-muted rounded-lg transition-colors"
-                    title="编辑"
+                    onClick={() => !isLoading && setIsEditMode(true)}
+                    disabled={isLoading}
+                    className={cn(
+                      "p-2 hover:bg-muted rounded-lg transition-colors",
+                      isLoading && "opacity-50 cursor-not-allowed"
+                    )}
+                    title={isLoading ? "正在运行不可编辑" : "编辑"}
                   >
                     <Edit3 className="h-4 w-4 text-muted-foreground" />
                   </button>
                   <button
-                    onClick={onShare}
-                    className="p-2 hover:bg-muted rounded-lg transition-colors"
-                    title="分享"
+                    onClick={() => !isLoading && onShare()}
+                    disabled={isLoading}
+                    className={cn(
+                      "p-2 hover:bg-muted rounded-lg transition-colors",
+                      isLoading && "opacity-50 cursor-not-allowed"
+                    )}
+                    title={isLoading ? "正在运行不可分享" : "分享"}
                   >
                     <Share2 className="h-4 w-4 text-muted-foreground" />
                   </button>
-                  {pptProject && (
+                  {pptProject ? (
                     <DownloadPopover
                       projectId={pptProject.id}
                       title={pptProject.title}
+                      disabled={isLoading}
                     />
+                  ) : (
+                    <button
+                      disabled
+                      className="p-2 hover:bg-muted rounded-lg transition-colors opacity-50 cursor-not-allowed"
+                      title="生成中..."
+                    >
+                      <Download className="h-4 w-4 text-muted-foreground" />
+                    </button>
                   )}
                   <button
                     onClick={onPlay}

@@ -19,7 +19,8 @@ from .task_planner import (
     check_ppt_intent,
     generate_supplement_info_with_llm,
     stream_task_plan_with_llm,
-    stream_outline_generation
+    stream_outline_generation,
+    analyze_user_intent_for_paused_session
 )
 from .ppt_generator import (
     create_tool_call,
@@ -47,6 +48,7 @@ __all__ = [
     "generate_supplement_info_with_llm",
     "stream_task_plan_with_llm",
     "stream_outline_generation",
+    "analyze_user_intent_for_paused_session",
     # PPT Generator
     "create_tool_call",
     "parse_num_pages",

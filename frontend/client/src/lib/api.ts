@@ -18,14 +18,7 @@ const API_BASE = "/api";
 // ==================== 对话相关 API ====================
 
 export interface ConversationDetail {
-  conversation: {
-    id: number;
-    uuid: string;
-    user_id: string;
-    title: string;
-    created_at: string;
-    updated_at: string;
-  };
+  conversation: Conversation;
   messages?: Message[];
   ppt_project?: PPTProject;
   task_plans?: TaskPlan[];

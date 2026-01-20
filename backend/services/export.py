@@ -17,7 +17,6 @@ PPTAgent 导出服务模块
   - 添加导出质量报告
   - 优化 Playwright 等待时间
   - 优化字体处理
-- 2026-01-20 修复了pdf 和 html 下载样式丢失的问题
 """
 
 import os
@@ -43,6 +42,10 @@ from services.pptx_generator import generate_pptx
 # HTML 验证
 from services.html_validator import validate_html
 
+# HTML 解析
+from bs4 import BeautifulSoup
+import re
+
 logger = logging.getLogger(__name__)
 
 # 导出文件存储目录
@@ -56,48 +59,124 @@ class PPTExporter:
     def __init__(self):
         self.slide_width = 1280
         self.slide_height = 720
-        
-    async def export_to_pdf(
-        self, 
-        slides_html: List[str], 
-        title: str = "presentation"
-    ) -> Tuple[str, str]:
+    
+    def _parse_slide_html(self, html: str) -> Tuple[List[str], str]:
         """
-        导出 PDF - 使用 iframe 隔离方案，与 HTML 导出保持一致
+        解析幻灯片 HTML，提取样式和 body 内容
         
-        方案：
-        1. 生成与 HTML 导出相同的 iframe 结构
-        2. 使用 Playwright 渲染并打印为 PDF
+        Returns:
+            (styles, body_content)
         """
-        import html as html_module
+        soup = BeautifulSoup(html, 'html.parser')
         
-        try:
-            filename = f"{title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-            filepath = EXPORT_DIR / filename
+        # 提取所有 <style> 标签
+        styles = []
+        for style_tag in soup.find_all('style'):
+            styles.append(style_tag.string or "")
+        
+        # 提取 <body> 内容
+        body = soup.find('body')
+        if body:
+            # 移除 <body> 标签，只保留内容
+            body_content = ''.join(str(child) for child in body.children)
+        else:
+            body_content = ""
+        
+        return styles, body_content
+    
+    def _scope_css(self, css: str, scope_class: str) -> str:
+        """
+        为 CSS 添加 scoping，避免样式冲突
+        
+        例如：
+        .title { color: blue; }
+        =>
+        .slide-1 .title { color: blue; }
+        """
+        lines = []
+        in_media_query = False
+        in_keyframes = False
+        
+        for line in css.split('\n'):
+            stripped = line.strip()
             
-            # 构建 iframe 版本的 HTML（与 HTML 导出相同的结构）
-            slides_content = []
-            for i, slide_html in enumerate(slides_html):
-                full_slide_html = self._ensure_slide_dependencies(slide_html)
-                escaped_html = html_module.escape(full_slide_html)
+            # 处理 @media 查询
+            if stripped.startswith('@media'):
+                in_media_query = True
+                lines.append(line)
+                continue
+            
+            # 处理 @keyframes
+            if stripped.startswith('@keyframes'):
+                in_keyframes = True
+                lines.append(line)
+                continue
+            
+            # 检测块结束
+            if stripped == '}':
+                if in_media_query:
+                    in_media_query = False
+                elif in_keyframes:
+                    in_keyframes = False
+                lines.append(line)
+                continue
+            
+            # 如果在 @media 或 @keyframes 中，不添加 scoping
+            if in_media_query or in_keyframes:
+                lines.append(line)
+                continue
+            
+            # 处理普通样式规则
+            if '{' in stripped and not stripped.startswith('@') and not stripped.startswith('/*'):
+                selector = stripped[:stripped.index('{')].strip()
+                rest = stripped[stripped.index('{'):]
                 
-                slides_content.append(f'''
-                    <div class="slide-page">
-                        <iframe 
-                            srcdoc="{escaped_html}"
-                            class="slide-frame"
-                            frameborder="0"
-                            scrolling="no"
-                        ></iframe>
-                    </div>
-                ''')
+                # 分割多个选择器（逗号分隔）
+                selectors = [s.strip() for s in selector.split(',')]
+                scoped_selectors = []
+                
+                for sel in selectors:
+                    if sel:
+                        # 为每个选择器添加 scoping
+                        scoped_sel = f".{scope_class} {sel}"
+                        scoped_selectors.append(scoped_sel)
+                
+                scoped_line = ', '.join(scoped_selectors) + ' ' + rest
+                lines.append(' ' * (len(line) - len(line.lstrip())) + scoped_line)
+            else:
+                lines.append(line)
+        
+        return '\n'.join(lines)
+    
+    def _merge_slides_html(self, slides_html: List[str]) -> str:
+        """
+        合并多个幻灯片的 HTML，直接拼接而不使用 iframe
+        简化版本：不使用 CSS scoping，直接包装每个幻灯片
+        """
+        all_contents = []
+        
+        for i, slide_html in enumerate(slides_html):
+            # 确保幻灯片有完整的依赖
+            full_slide_html = self._ensure_slide_dependencies(slide_html)
             
-            # PDF 专用的 HTML 模板（每页一个幻灯片，分页打印）
-            pdf_html = f'''<!DOCTYPE html>
+            # 直接包装每个幻灯片的完整 HTML
+            wrapped_content = f'''
+            <div class="slide-page" id="slide-{i+1}">
+                <iframe 
+                    srcdoc="{full_slide_html.replace('"', '&quot;')}"
+                    style="width: 100%; height: 100%; border: none;"
+                ></iframe>
+            </div>
+            '''
+            all_contents.append(wrapped_content)
+        
+        # 合并成最终的 HTML
+        merged_html = f'''<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <style>
+        /* 全局样式 */
         * {{
             margin: 0;
             padding: 0;
@@ -116,18 +195,34 @@ class PPTExporter:
         .slide-page:last-child {{
             page-break-after: auto;
         }}
-        .slide-frame {{
-            width: 100%;
-            height: 100%;
-            border: none;
-            display: block;
-        }}
     </style>
 </head>
 <body>
-    {''.join(slides_content)}
+    {''.join(all_contents)}
 </body>
 </html>'''
+        
+        return merged_html
+        
+    async def export_to_pdf(
+        self, 
+        slides_html: List[str], 
+        title: str = "presentation"
+    ) -> Tuple[str, str]:
+        """
+        导出 PDF - 直接拼接 HTML，不使用 iframe
+        
+        方案：
+        1. 解析每个幻灯片的 HTML，提取样式和内容
+        2. 直接拼接所有幻灯片的内容
+        3. 使用 Playwright 渲染并打印为 PDF
+        """
+        try:
+            filename = f"{title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            filepath = EXPORT_DIR / filename
+            
+            # 直接合并所有幻灯片的 HTML
+            pdf_html = self._merge_slides_html(slides_html)
             
             async with async_playwright() as p:
                 browser = await p.chromium.launch(
@@ -138,11 +233,29 @@ class PPTExporter:
                 page = await browser.new_page()
                 
                 # 加载 HTML
-                await page.set_content(pdf_html, wait_until="load", timeout=60000)
+                await page.set_content(pdf_html, wait_until="domcontentloaded", timeout=120000)
                 
-                # 等待 iframe 内容加载完成
-                # iframe 需要额外时间加载外部资源
-                await page.wait_for_timeout(5000)
+                # 等待页面渲染完成（增加等待时间确保 iframe 渲染）
+                await page.wait_for_timeout(3000)
+                
+                # 等待所有 iframe 加载完成
+                await page.evaluate("""() => {
+                    return Promise.all(
+                        Array.from(document.querySelectorAll('iframe')).map(iframe => {
+                            return new Promise((resolve) => {
+                                if (iframe.contentDocument && iframe.contentDocument.readyState === 'complete') {
+                                    resolve();
+                                } else {
+                                    iframe.addEventListener('load', resolve);
+                                    setTimeout(resolve, 2000); // 超时保护
+                                }
+                            });
+                        })
+                    );
+                }""")
+                
+                # 再等待一下确保渲染完成
+                await page.wait_for_timeout(2000)
                 
                 # 打印 PDF
                 await page.pdf(
@@ -253,8 +366,9 @@ class PPTExporter:
                 temp_html = self._create_temp_slide_html(slide)
                 
                 # 设置内容并等待加载
-                # 60s 超时，load 状态确保所有资源加载
-                await page.set_content(temp_html, wait_until="load", timeout=60000)
+                # 使用 domcontentloaded 减少等待时间，因为资源已内联
+                # 超时增加到 120s 以应对复杂情况
+                await page.set_content(temp_html, wait_until="domcontentloaded", timeout=120000)
                 
                 # 额外等待动画和图表渲染
                 await page.wait_for_timeout(2000)

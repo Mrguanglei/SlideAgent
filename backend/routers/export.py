@@ -105,23 +105,93 @@ async def export_ppt_file(
         safe_title = re.sub(r'\s+', '_', safe_title)
         safe_title = safe_title[:50] or "presentation"
         
-        # 导出
-        filepath, filename = await export_ppt(slides_html, request.format, safe_title)
         
-        # 返回文件下载
-        media_type_map = {
-            "pdf": "application/pdf",
-            "html": "text/html",
-            "png": "application/zip",
-            "images": "application/zip",
-            "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-        }
-        
-        return FileResponse(
-            filepath,
-            media_type=media_type_map.get(request.format, "application/octet-stream"),
-            filename=filename
-        )
+        # 0. 检查缓存
+        cached_export = await crud.get_ppt_export(db, version.id, request.format)
+        if cached_export and cached_export.file_data:
+            # 从数据库读取文件数据
+            logger.info(f"Using cached export from database: {cached_export.filename}")
+            file_data = cached_export.file_data
+            filename = cached_export.filename
+            
+            # 返回文件下载
+            media_type_map = {
+                "pdf": "application/pdf",
+                "html": "text/html",
+                "png": "application/zip",
+                "images": "application/zip",
+                "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            }
+            
+            return Response(
+                content=file_data,
+                media_type=media_type_map.get(request.format, "application/octet-stream"),
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"'
+                }
+            )
+        else:
+            # 导出
+            filepath, filename = await export_ppt(slides_html, request.format, safe_title)
+            
+            # 读取文件数据
+            try:
+                with open(filepath, 'rb') as f:
+                    file_data = f.read()
+                file_size = len(file_data)
+                
+                # 保存到数据库（包括文件数据）
+                await crud.create_ppt_export(
+                    db, 
+                    project_id=project.id,
+                    version_id=version.id,
+                    format=request.format,
+                    file_path=str(filepath),
+                    filename=filename,
+                    file_size=file_size,
+                    file_data=file_data
+                )
+                logger.info(f"Saved export to database: {filename} ({file_size} bytes)")
+                
+                # 删除临时文件（可选）
+                try:
+                    os.remove(filepath)
+                    logger.info(f"Removed temporary file: {filepath}")
+                except Exception as e:
+                    logger.warning(f"Failed to remove temporary file: {e}")
+                
+            except Exception as e:
+                logger.error(f"Failed to save export to database: {e}")
+                # 如果保存失败，仍然返回文件
+                media_type_map = {
+                    "pdf": "application/pdf",
+                    "html": "text/html",
+                    "png": "application/zip",
+                    "images": "application/zip",
+                    "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                }
+                return FileResponse(
+                    filepath,
+                    media_type=media_type_map.get(request.format, "application/octet-stream"),
+                    filename=filename
+                )
+            
+            # 返回文件下载
+            media_type_map = {
+                "pdf": "application/pdf",
+                "html": "text/html",
+                "png": "application/zip",
+                "images": "application/zip",
+                "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            }
+            
+            return Response(
+                content=file_data,
+                media_type=media_type_map.get(request.format, "application/octet-stream"),
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"'
+                }
+            )
         
     except HTTPException:
         raise

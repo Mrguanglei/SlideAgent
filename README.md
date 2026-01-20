@@ -4,11 +4,11 @@
 
 **SlideAgent** is an open-source AI-driven presentation generation tool. Simply input your ideas to automatically generate beautiful PPTs, supporting multiple export formats and online sharing.
 
-# Please star if you find this helpful ✨ ✨ ✨ ✨ ✨
+#### Please star if you find this helpful ✨ ✨ ✨ ✨ ✨
 
 ![SlideAgent Homepage](images/home.png)
 
-## ⚠️ Note: This project is based on [PPTAgent (CAS)](https://github.com/icip-cas/PPTAgent) with secondary development, the code part still maintains the PPTAgent naming
+#### ⚠️ Note: This project is based on [PPTAgent (CAS)](https://github.com/icip-cas/PPTAgent) with secondary development, the code part still maintains the PPTAgent naming
 
 ## ✨ Main Features
 
@@ -20,15 +20,14 @@
 | **Knowledge Base** | ✅ | Upload documents, generate PPTs based on knowledge base content |
 | **Task Queue** | ✅ | Batch upload documents, automatic backend queue processing |
 
-## ✨ TODO
-
+## ✨ Complete
 - [x] **Content Editing** - Directly edit text content on preview page
 - [x] **Online Preview** - Real-time PPT preview in browser
-- [x] **Download Export** - Support export to PDF, HTML, PPTX formats. Note: Some styles may be lost. PPTX support is in progress.
+- [x] **Download Export** - Support export to PDF, HTML, PPTX formats，Note: The style will be lost.PPTX Processing in progress.
 - [ ] **Conversational Editing** - Continuously modify and optimize PPT content through dialogue
-
+- [ ] **Database Search Tool** - Call the knowledge base tool
 - [ ] **Multi-version Management** - Save historical versions, rollback and compare anytime
-- [ ] **State Management** - Agent task status global persistence design
+
 
 ## 🚀 Quick Start
 
@@ -68,7 +67,8 @@
 | ![Home](images/home.png) | ![Chat Generation](images/chat.png) |
 | **Knowledge Base** | **Global Search** |
 | ![Knowledge Base](images/knowledge.png) | ![Global Search](images/search.png) |
-
+| **Online Editing** | **Multiple Downloads** |
+| ![Online Editing](images/editor.png) | ![Multiple Downloads](images/download.png) |
 
 ## 🛠️ Project Structure
 

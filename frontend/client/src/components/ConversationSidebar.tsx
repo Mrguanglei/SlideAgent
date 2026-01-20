@@ -17,6 +17,17 @@ import {
   BookOpen,
 } from "lucide-react";
 import { useLocation } from "wouter";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { Conversation } from "@/types";
 import SearchDialog from "./SearchDialog";
 
@@ -42,6 +53,24 @@ export default function ConversationSidebar({
   const [location, setLocation] = useLocation();
   const [searchOpen, setSearchOpen] = useState(false);
   const isKnowledgeActive = location === "/knowledge-base";
+
+  // 删除确认弹窗状态
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [conversationToDelete, setConversationToDelete] = useState<number | null>(null);
+
+  const handleDeleteClick = (e: React.MouseEvent, id: number) => {
+    e.stopPropagation();
+    setConversationToDelete(id);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleConfirmDelete = () => {
+    if (conversationToDelete !== null) {
+      onDeleteConversation(conversationToDelete);
+      setDeleteDialogOpen(false);
+      setConversationToDelete(null);
+    }
+  };
 
   if (collapsed) {
     return (
@@ -133,6 +162,14 @@ export default function ConversationSidebar({
                     <MessageSquare className="h-3.5 w-3.5 shrink-0" />
                   )}
 
+                  {/* 运行中动画指示器 */}
+                  {conv.task_status === "running" && (
+                    <span className="relative flex h-2 w-2 shrink-0">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+                    </span>
+                  )}
+
                   {/* 标题 */}
                   <span className="flex-1 text-xs truncate">
                     {conv.title}
@@ -140,12 +177,7 @@ export default function ConversationSidebar({
 
                   {/* 删除按钮 */}
                   <button
-                    onClick={e => {
-                      e.stopPropagation();
-                      if (confirm("确定要删除这个对话吗？")) {
-                        onDeleteConversation(conv.id);
-                      }
-                    }}
+                    onClick={(e) => handleDeleteClick(e, conv.id)}
                     className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-100 hover:text-red-600 transition-all"
                   >
                     <Trash2 className="h-3 w-3" />
@@ -162,8 +194,8 @@ export default function ConversationSidebar({
             onClick={() => setLocation("/knowledge-base")}
             className={cn(
               "w-full flex items-center gap-2 px-2.5 py-2 rounded-lg transition-colors text-sm",
-              isKnowledgeActive 
-                ? "bg-primary/10 text-primary" 
+              isKnowledgeActive
+                ? "bg-primary/10 text-primary"
                 : "hover:bg-gray-100 text-muted-foreground hover:text-foreground"
             )}
           >
@@ -175,6 +207,25 @@ export default function ConversationSidebar({
 
       {/* 搜索弹窗 */}
       <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
+
+
+      {/* 删除确认弹窗 */}
+      < AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen} >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除对话</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定要删除这个对话吗？此操作无法撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog >
     </>
   );
 }

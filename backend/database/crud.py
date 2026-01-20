@@ -16,7 +16,7 @@ from .models import (
     Conversation, Message, ToolCall,
     SearchRound, SearchResult, TaskPlan,
     PPTProject, PPTVersion, PPTSlide,
-    Share
+    Share, Session, PPTExport
 )
 
 logger = logging.getLogger(__name__)
@@ -839,3 +839,204 @@ async def cleanup_expired_shares(
     if count > 0:
         logger.info(f"Cleaned up {count} expired shares")
     return count
+
+
+# ==================== Session 相关操作 ====================
+
+async def create_session(
+    db: AsyncSession,
+    session_id: str,
+    topic: str,
+    conversation_id: Optional[int] = None,
+    stage: str = "init",
+    task_status: str = "idle"
+) -> Session:
+    """创建 session"""
+    session = Session(
+        id=session_id,
+        topic=topic,
+        conversation_id=conversation_id,
+        stage=stage,
+        task_status=task_status
+    )
+    db.add(session)
+    await db.flush()
+    await db.refresh(session)
+    logger.info(f"Created session: {session_id}")
+    return session
+
+
+async def get_session(
+    db: AsyncSession,
+    session_id: str
+) -> Optional[Session]:
+    """获取 session"""
+    query = select(Session).where(Session.id == session_id)
+    result = await db.execute(query)
+    return result.scalar_one_or_none()
+
+
+async def update_session(
+    db: AsyncSession,
+    session_id: str,
+    stage: Optional[str] = None,
+    task_status: Optional[str] = None,
+    topic: Optional[str] = None,
+    conversation_id: Optional[int] = None,
+    supplement_data: Optional[Dict[str, Any]] = None,
+    search_results: Optional[List[Dict]] = None,
+    outline_content: Optional[str] = None,
+    deep_thinking_content: Optional[str] = None
+) -> Optional[Session]:
+    """更新 session 状态和数据"""
+    values = {"updated_at": datetime.utcnow()}
+    
+    if stage is not None:
+        values["stage"] = stage
+    if task_status is not None:
+        values["task_status"] = task_status
+    if topic is not None:
+        values["topic"] = topic
+    if conversation_id is not None:
+        values["conversation_id"] = conversation_id
+    if supplement_data is not None:
+        values["supplement_data"] = supplement_data
+    if search_results is not None:
+        values["search_results"] = search_results
+    if outline_content is not None:
+        values["outline_content"] = outline_content
+    if deep_thinking_content is not None:
+        values["deep_thinking_content"] = deep_thinking_content
+    
+    stmt = update(Session).where(Session.id == session_id).values(**values)
+    result = await db.execute(stmt)
+    
+    if result.rowcount > 0:
+        session = await get_session(db, session_id)
+        
+        # 同步更新 Conversation 的 task_status
+        if session and session.conversation_id and task_status is not None:
+            try:
+                await db.execute(
+                    update(Conversation)
+                    .where(Conversation.id == session.conversation_id)
+                    .values(task_status=task_status)
+                )
+                logger.info(f"Synced task_status '{task_status}' to conversation {session.conversation_id}")
+            except Exception as e:
+                logger.error(f"Failed to sync task_status to conversation: {e}")
+                
+        return session
+    return None
+
+
+async def delete_session(
+    db: AsyncSession,
+    session_id: str
+) -> bool:
+    """删除 session"""
+    stmt = delete(Session).where(Session.id == session_id)
+    result = await db.execute(stmt)
+    return result.rowcount > 0
+
+
+async def get_or_create_session(
+    db: AsyncSession,
+    session_id: str,
+    topic: str,
+    conversation_id: Optional[int] = None
+) -> tuple[Session, bool]:
+    """
+    获取或创建 session
+    
+    返回: (session, is_new) - session 对象和是否新创建的标志
+    """
+    existing = await get_session(db, session_id)
+    if existing:
+        return existing, False
+    
+    new_session = await create_session(
+        db, session_id, topic, conversation_id, stage="init"
+    )
+    return new_session, True
+
+
+async def get_sessions_by_status(
+    db: AsyncSession,
+    task_status: str
+) -> List[Session]:
+    """获取指定任务状态的所有 session"""
+    query = select(Session).where(Session.task_status == task_status)
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
+async def get_session_by_conversation(
+    db: AsyncSession,
+    conversation_id: int
+) -> Optional[Session]:
+    """获取对话关联的 session"""
+    query = select(Session).where(Session.conversation_id == conversation_id).order_by(Session.updated_at.desc())
+    result = await db.execute(query)
+    return result.scalars().first()
+
+
+# ==================== Export Caching ====================
+
+async def get_ppt_export(
+    db: AsyncSession,
+    version_id: int,
+    format: str
+) -> Optional[PPTExport]:
+    """获取导出的缓存记录"""
+    query = select(PPTExport).where(
+        PPTExport.version_id == version_id,
+        PPTExport.format == format
+    ).order_by(desc(PPTExport.created_at)).limit(1)
+    result = await db.execute(query)
+    return result.scalar_one_or_none()
+
+
+async def create_ppt_export(
+    db: AsyncSession,
+    project_id: int,
+    version_id: int,
+    format: str,
+    file_path: str,
+    filename: str,
+    file_size: int = 0,
+    file_data: bytes = None
+) -> PPTExport:
+    """创建导出缓存记录"""
+    # 先删除旧的同类缓存
+    await delete_ppt_export(db, version_id, format)
+    
+    export = PPTExport(
+        project_id=project_id,
+        version_id=version_id,
+        format=format,
+        file_path=file_path,
+        filename=filename,
+        file_size=file_size,
+        file_data=file_data
+    )
+    db.add(export)
+    await db.commit()
+    await db.refresh(export)
+    return export
+
+
+async def delete_ppt_export(
+    db: AsyncSession,
+    version_id: int,
+    format: str
+) -> bool:
+    """删除导出缓存记录"""
+    stmt = delete(PPTExport).where(
+        PPTExport.version_id == version_id,
+        PPTExport.format == format
+    )
+    result = await db.execute(stmt)
+    return result.rowcount > 0
+
+

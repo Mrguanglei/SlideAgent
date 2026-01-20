@@ -133,6 +133,14 @@ async def run_migrations(engine: AsyncEngine):
 
                 logger.info("✓ UUID column added to conversations table")
 
+            # 添加 task_status 列
+            await check_and_add_column(
+                engine,
+                "conversations",
+                "task_status",
+                "VARCHAR(20) DEFAULT 'idle'"
+            )
+
         # ==================== 清理旧列 ====================
         # 删除旧的 knowledge_base_id 列（如果存在）
         if await check_table_exists(engine, "knowledge_documents"):
@@ -295,7 +303,58 @@ async def run_migrations(engine: AsyncEngine):
                 "embedding_vector",
                 "JSONB"
             )
-        
+
+        # ==================== sessions 表 ====================
+        if await check_table_exists(engine, "sessions"):
+            # 添加 task_status 列
+            await check_and_add_column(
+                engine,
+                "sessions",
+                "task_status",
+                "VARCHAR(20) DEFAULT 'idle'"
+            )
+            
+            # 创建索引
+            async with engine.begin() as conn:
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sessions_task_status ON sessions (task_status)"))
+
+            async with engine.begin() as conn:
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sessions_task_status ON sessions (task_status)"))
+
+        # ==================== ppt_exports 表 ====================
+        if not await check_table_exists(engine, "ppt_exports"):
+            logger.info("Creating ppt_exports table...")
+            async with engine.begin() as conn:
+                await conn.execute(text("""
+                    CREATE TABLE ppt_exports (
+                        id BIGSERIAL PRIMARY KEY,
+                        project_id BIGINT NOT NULL,
+                        version_id BIGINT NOT NULL,
+                        format VARCHAR(20) NOT NULL,
+                        file_path VARCHAR(500),
+                        filename VARCHAR(255) NOT NULL,
+                        file_size BIGINT DEFAULT 0,
+                        file_data BYTEA,
+                        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL,
+                        CONSTRAINT fk_ppt_exports_project FOREIGN KEY (project_id) REFERENCES ppt_projects (id) ON DELETE CASCADE,
+                        CONSTRAINT fk_ppt_exports_version FOREIGN KEY (version_id) REFERENCES ppt_versions (id) ON DELETE CASCADE
+                    )
+                """))
+                await conn.execute(text("CREATE INDEX idx_export_version_format ON ppt_exports (version_id, format)"))
+                await conn.execute(text("CREATE INDEX idx_export_project ON ppt_exports (project_id)"))
+            logger.info("✓ ppt_exports table created")
+        else:
+            # 如果表已存在，添加 file_data 列
+            await check_and_add_column(
+                engine,
+                "ppt_exports",
+                "file_data",
+                "BYTEA"
+            )
+            
+            # 将 file_path 改为可选
+            await drop_not_null_constraint(engine, "ppt_exports", "file_path")
+
         logger.info("✓ Database migrations completed")
         
     except Exception as e:

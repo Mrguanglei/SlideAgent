@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useLocation } from "wouter";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -20,6 +21,7 @@ import {
   X,
   MessageSquarePlus,
   FolderOpen,
+  Pause,
 } from "lucide-react";
 
 // 组件导入
@@ -185,6 +187,18 @@ export default function Home() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const isStreamingRef = useRef(false); // 跟踪是否正在进行本地流式传输
+  const currentSessionIdRef = useRef<string | null>(null);
+  const currentConversationIdRef = useRef<number | null>(null);
+
+  // Sync Refs
+  useEffect(() => {
+    currentSessionIdRef.current = currentSessionId;
+  }, [currentSessionId]);
+
+  useEffect(() => {
+    currentConversationIdRef.current = currentConversationId;
+  }, [currentConversationId]);
 
   // ==================== 初始化 ====================
 
@@ -214,6 +228,24 @@ export default function Home() {
     };
     loadData();
   }, [params.conversationId]);
+
+  // 轮询机制：当任务正在运行且没有本地流式传输时（即切换对话后），定期刷新状态
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+
+    if (isLoading && !isStreamingRef.current && currentConversationUuid) {
+      interval = setInterval(() => {
+        // 使用静默加载，避免闪烁（这里复用 loadConversation，实际可能需要优化以减少全量替换的视觉影响）
+        // 但为了保证数据同步，直接调用是可行的，因为 React diff 会处理 DOM 更新
+        console.log("Polling conversation status...");
+        loadConversation(currentConversationUuid);
+      }, 3000);
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isLoading, currentConversationUuid]);
 
   // 自动滚动到底部
   useEffect(() => {
@@ -246,6 +278,21 @@ export default function Home() {
       setCurrentConversationId(data.conversation.id);
       setCurrentConversationUuid(uuid);
 
+      // 设置 session_id
+      if (data.session_id) {
+        console.log(`[loadConversation] Setting session_id: ${data.session_id}`);
+        setCurrentSessionId(data.session_id);
+      }
+
+      // 根据 task_status 设置 isLoading 状态
+      // 只有当 task_status 为 running 且 currentConversationId 匹配时才设置 isLoading
+      if (data.task_status === "running") {
+        setIsLoading(true);
+        setIsEditMode(false); // 正在运行时强制退出编辑模式
+      } else {
+        setIsLoading(false);
+      }
+
       // 恢复消息
       if (data.messages) {
         const restoredMessages: Message[] = data.messages.map((msg: any) => ({
@@ -258,9 +305,9 @@ export default function Home() {
             type: tc.tool_type,
             name: tc.tool_name,
             status: tc.status,
-            // 合并 arguments 和 result，确保 query 和 results 都能获取到
             data: { ...(tc.arguments || {}), ...(tc.result || {}) },
           })),
+          streaming: false, // 恢复的历史消息不应显示"正在生成..."
         }));
         setMessages(restoredMessages);
       }
@@ -405,8 +452,10 @@ export default function Home() {
       if (currentConversationId === id) {
         handleNewChat();
       }
+      toast.success("对话已删除");
     } catch (error) {
       console.error("Failed to delete conversation:", error);
+      toast.error("删除失败");
     }
   };
 
@@ -423,6 +472,16 @@ export default function Home() {
     setMessages(prev => [...prev, userMessage]);
     setInputValue("");
     setIsLoading(true);
+
+    // 更新当前对话的任务状态为 running
+    if (currentConversationId) {
+      setConversations(prev =>
+        prev.map(c =>
+          c.id === currentConversationId ? { ...c, task_status: "running" as const } : c
+        )
+      );
+    }
+
     // 只在新对话时设置临时 topic，后续会被 AI 生成的主题替换
     if (!currentConversationId) {
       setCurrentTopic(userMessage.content);
@@ -432,8 +491,15 @@ export default function Home() {
     // 创建 AbortController
     abortControllerRef.current = new AbortController();
 
-    try {
-      const response = await fetch("/api/chat", {
+    let response;
+
+    // PPT 生成请求
+    if (isPptMode) {
+      setIsLoading(true);
+      setIsEditMode(false); // 开始生成时强制退出编辑模式
+      isStreamingRef.current = true; // 标记开始流式传输
+
+      response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -442,7 +508,19 @@ export default function Home() {
         }),
         signal: abortControllerRef.current.signal,
       });
+    } else {
+      response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          instruction: userMessage.content,
+          conversation_id: currentConversationId,
+        }),
+        signal: abortControllerRef.current.signal,
+      });
+    }
 
+    try {
       if (!response.ok) {
         throw new Error("Chat request failed");
       }
@@ -493,6 +571,9 @@ export default function Home() {
       }
     } finally {
       setIsLoading(false);
+      // 刷新对话列表以同步最新的 task_status
+      loadConversations();
+      isStreamingRef.current = false; // 标记流式传输结束
     }
   };
 
@@ -645,8 +726,27 @@ export default function Home() {
         break;
 
       case "done":
+        console.log("[handleStreamEvent] Task completed, resetting states");
         setIsLoading(false);
+        isStreamingRef.current = false; // 任务完成时重置流式传输状态
         loadConversations();
+        // 刷新当前的对话详情，确保 PPT 项目数据（包括 slides）是最新的，从而开启编辑功能
+        if (currentConversationUuid) {
+          loadConversation(currentConversationUuid);
+        }
+
+        // 确保最后一条消息的 streaming 状态被清除
+        setMessages(prev => {
+          if (prev.length === 0) return prev;
+          const lastMsg = prev[prev.length - 1];
+          if (lastMsg.role === "assistant" && lastMsg.streaming) {
+            return [
+              ...prev.slice(0, -1),
+              { ...lastMsg, streaming: false }
+            ];
+          }
+          return prev;
+        });
         break;
     }
   };
@@ -656,7 +756,7 @@ export default function Home() {
     console.log("[Frontend] data.data field:", data.data);
 
     const toolCall: ToolCall = {
-      id: data.id || `tool-${Date.now()}`,
+      id: String(data.id || `tool-${Date.now()}`),
       type: data.tool_type,
       name: data.tool_name,
       status: data.status || "running",
@@ -689,7 +789,7 @@ export default function Home() {
     // 处理补充信息工具
     if (data.tool_type === "supplement_info" && data.status === "pending") {
       setPendingToolCallId(toolCall.id);
-      startAutoConfirmCountdown();
+      startAutoConfirmCountdown(toolCall.id);
 
       // 从补充信息中提取 AI 生成的主题
       const generatedTopic = data.data?.topic;
@@ -772,7 +872,8 @@ export default function Home() {
     }
   };
 
-  const startAutoConfirmCountdown = () => {
+  const startAutoConfirmCountdown = (toolCallId: string) => {
+    console.log(`[startAutoConfirmCountdown] Starting countdown for tool: ${toolCallId}`);
     setAutoConfirmCountdown(30);
 
     if (autoConfirmTimerRef.current) {
@@ -781,11 +882,13 @@ export default function Home() {
 
     autoConfirmTimerRef.current = setInterval(() => {
       setAutoConfirmCountdown(prev => {
-        if (prev === null || prev <= 1) {
+        if (prev === null || prev <= 0) {
+          console.log(`[startAutoConfirmCountdown] Countdown reached 0, triggering auto-confirm for tool: ${toolCallId}`);
           clearInterval(autoConfirmTimerRef.current!);
-          handleConfirmInfo(pendingToolCallId, {});
+          handleConfirmInfo(toolCallId, {});
           return null;
         }
+        console.log(`[startAutoConfirmCountdown] Countdown: ${prev - 1}`);
         return prev - 1;
       });
     }, 1000);
@@ -802,25 +905,42 @@ export default function Home() {
     cancelAutoConfirm();
 
     // 立即更新工具状态，让卡片立即折叠
+    // 立即更新工具状态，让卡片立即折叠
+    const targetId = String(toolCallId); // 确保 ID 类型一致
+    console.log(`[handleConfirmInfo] Updating status for tool: ${targetId}`);
+
     setMessages(prev =>
       prev.map(msg => ({
         ...msg,
-        toolCalls: msg.toolCalls?.map(tc =>
-          tc.id === toolCallId ? { ...tc, status: "confirmed" as const } : tc
-        ),
+        toolCalls: msg.toolCalls?.map(tc => {
+          const tcId = String(tc.id);
+          if (tcId === targetId) {
+            console.log(`[handleConfirmInfo] Found target tool ${tcId}, setting to confirmed`);
+            return { ...tc, status: "confirmed" as const };
+          }
+          return tc;
+        }),
       }))
     );
 
     // 设置确认状态，显示加载动画
     setIsConfirming(true);
+    setIsLoading(true); // 设置全局加载状态，确保显示暂停按钮
+    setIsEditMode(false); // 开始生成时强制退出编辑模式
+    isStreamingRef.current = true; // 标记开始流式传输
+
+    console.log(`[handleConfirmInfo] Sending confirm request with:`);
+    console.log(`  session_id: ${currentSessionIdRef.current}`);
+    console.log(`  conversation_id: ${currentConversationIdRef.current}`);
+    console.log(`  supplement_data:`, selectedData);
 
     try {
       const response = await fetch("/api/ppt/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          session_id: currentSessionId,
-          conversation_id: currentConversationId,
+          session_id: currentSessionIdRef.current,
+          conversation_id: currentConversationIdRef.current,
           supplement_data: selectedData,
         }),
       });
@@ -837,7 +957,10 @@ export default function Home() {
 
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
+          if (done) {
+            console.log("[handleConfirmInfo] Stream completed");
+            break;
+          }
 
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
@@ -854,9 +977,16 @@ export default function Home() {
             }
           }
         }
+      } else {
+        console.warn("[handleConfirmInfo] No response body reader available");
       }
     } catch (error) {
       console.error("Confirm error:", error);
+      setIsLoading(false); // 发生错误时重置状态
+      isStreamingRef.current = false; // 错误时也要重置
+    } finally {
+      setIsConfirming(false); // 无论成功失败，结束确认状态
+      console.log("[handleConfirmInfo] Confirm process finished");
     }
   };
 
@@ -1207,7 +1337,7 @@ export default function Home() {
                 {isConfirming && (
                   <div className="mb-6">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm text-muted-foreground">正在生成中...</span>
+                      <span className="text-sm text-muted-foreground">正在...</span>
                       <LoadingDots />
                     </div>
                   </div>
@@ -1261,18 +1391,53 @@ export default function Home() {
                     </div>
                   )}
 
-                  <button
-                    onClick={handleSendMessage}
-                    disabled={!inputValue.trim() || isLoading}
-                    className={cn(
-                      "p-2 rounded-lg transition-colors",
-                      inputValue.trim() && !isLoading
-                        ? "bg-primary text-white hover:bg-primary/90"
-                        : "bg-muted text-muted-foreground"
-                    )}
-                  >
-                    <Send className="h-4 w-4" />
-                  </button>
+                  {/* 发送或暂停按钮 */}
+                  {isLoading ? (
+                    <button
+                      onClick={async () => {
+                        // 调用暂停 API
+                        if (currentSessionId) {
+                          try {
+                            await fetch(`/api/sessions/${currentSessionId}/pause`, {
+                              method: "POST",
+                            });
+                            // 中止当前请求
+                            if (abortControllerRef.current) {
+                              abortControllerRef.current.abort();
+                            }
+                            setIsLoading(false);
+                            // 更新对话状态
+                            if (currentConversationId) {
+                              setConversations(prev =>
+                                prev.map(c =>
+                                  c.id === currentConversationId ? { ...c, task_status: "paused" as const } : c
+                                )
+                              );
+                            }
+                          } catch (e) {
+                            console.error("Pause failed:", e);
+                          }
+                        }
+                      }}
+                      className="p-2 rounded-lg transition-colors bg-orange-500 text-white hover:bg-orange-600"
+                      title="暂停任务"
+                    >
+                      <Pause className="h-4 w-4" />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleSendMessage}
+                      disabled={!inputValue.trim()}
+                      className={cn(
+                        "p-2 rounded-lg transition-colors",
+                        inputValue.trim()
+                          ? "bg-primary text-white hover:bg-primary/90"
+                          : "bg-muted text-muted-foreground"
+                      )}
+                    >
+                      <Send className="h-4 w-4" />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -1286,6 +1451,7 @@ export default function Home() {
         setRightPanelType={setRightPanelType}
         showRightPanel={showRightPanel}
         setShowRightPanel={setShowRightPanel}
+        isLoading={isLoading}
         pptHtmlCode={pptHtmlCode}
         pptViewMode={pptViewMode}
         setPptViewMode={setPptViewMode}

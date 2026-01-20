@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import {
   ChevronDown,
@@ -44,6 +44,15 @@ export default function ToolCallCard({
   const [selectedNumPages, setSelectedNumPages] = useState<string>("8-10页");
   const [keywords, setKeywords] = useState<string>("");
 
+  // 当工具状态变为 confirmed 时，自动折叠
+  useEffect(() => {
+    console.log(`[ToolCallCard] Tool ${tool.id} status changed to: ${tool.status}`);
+    if (tool.status === "confirmed") {
+      console.log(`[ToolCallCard] Collapsing tool ${tool.id}`);
+      setIsExpanded(false);
+    }
+  }, [tool.status, tool.id]);
+
   // 从 tool.data 获取动态选项
   const dynamicData = tool.data as {
     topic?: string;
@@ -57,6 +66,12 @@ export default function ToolCallCard({
     numPagesOptions?: string[];
     emphasisQuestion?: string;
     emphasisPlaceholder?: string;
+    // Confirmed data fields
+    audience?: string;
+    modules?: string[];
+    style?: string;
+    num_pages?: string;
+    keywords?: string;
   };
 
   const getIcon = () => {
@@ -164,176 +179,176 @@ export default function ToolCallCard({
                 {tool.status === "pending" ? (
                   // 待确认状态：显示表单
                   <>
-                <p className="text-sm text-muted-foreground">
-                  为了保证生成质量，我需要向您确认更多需求细节
-                </p>
-
-                {/* 受众选择 */}
-                {dynamicData.audienceOptions &&
-                  dynamicData.audienceOptions.length > 0 && (
-                    <div>
-                      <p className="text-sm mb-2.5">
-                        {dynamicData.audienceQuestion ||
-                          `这份PPT的目标受众是？`}
-                        <span className="text-muted-foreground ml-1">
-                          （单选）
-                        </span>
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {dynamicData.audienceOptions.map((opt) => (
-                          <button
-                            key={opt}
-                            onClick={() => setSelectedAudience(opt)}
-                            className={cn(
-                              "px-4 py-1.5 rounded-full text-sm border transition-colors",
-                              selectedAudience === opt
-                                ? "border-primary bg-primary/10 text-primary"
-                                : "border-border hover:border-primary/50"
-                            )}
-                          >
-                            {opt}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                {/* 内容模块选择 */}
-                {dynamicData.modulesOptions &&
-                  dynamicData.modulesOptions.length > 0 && (
-                    <div>
-                      <p className="text-sm mb-2.5">
-                        {dynamicData.modulesQuestion ||
-                          `PPT中需要包含哪些内容模块？`}
-                        <span className="text-muted-foreground ml-1">
-                          （多选）
-                        </span>
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {dynamicData.modulesOptions.map((opt) => (
-                          <button
-                            key={opt}
-                            onClick={() => toggleModule(opt)}
-                            className={cn(
-                              "px-4 py-1.5 rounded-full text-sm border transition-colors",
-                              selectedModules.includes(opt)
-                                ? "border-primary bg-primary/10 text-primary"
-                                : "border-border hover:border-primary/50"
-                            )}
-                          >
-                            {opt}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                {/* 设计风格选择 */}
-                {dynamicData.styleOptions &&
-                  dynamicData.styleOptions.length > 0 && (
-                    <div>
-                      <p className="text-sm mb-2.5">
-                        {dynamicData.styleQuestion ||
-                          `你期望的PPT设计风格是？`}
-                        <span className="text-muted-foreground ml-1">
-                          （单选）
-                        </span>
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {dynamicData.styleOptions.map((opt) => (
-                          <button
-                            key={opt}
-                            onClick={() => setSelectedStyle(opt)}
-                            className={cn(
-                              "px-4 py-1.5 rounded-full text-sm border transition-colors",
-                              selectedStyle === opt
-                                ? "border-primary bg-primary/10 text-primary"
-                                : "border-border hover:border-primary/50"
-                            )}
-                          >
-                            {opt}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                {/* 页数范围选择 */}
-                {dynamicData.numPagesOptions &&
-                  dynamicData.numPagesOptions.length > 0 && (
-                    <div>
-                      <p className="text-sm mb-2.5">
-                        {dynamicData.numPagesQuestion ||
-                          `您期望的PPT页数范围是？`}
-                        <span className="text-muted-foreground ml-1">
-                          （单选）
-                        </span>
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {dynamicData.numPagesOptions.map((opt) => (
-                          <button
-                            key={opt}
-                            onClick={() => setSelectedNumPages(opt)}
-                            className={cn(
-                              "px-4 py-1.5 rounded-full text-sm border transition-colors",
-                              selectedNumPages === opt
-                                ? "border-primary bg-primary/10 text-primary"
-                                : "border-border hover:border-primary/50"
-                            )}
-                          >
-                            {opt}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                {/* 关键词输入 */}
-                {dynamicData.emphasisQuestion && (
-                  <div>
-                    <p className="text-sm mb-2.5">
-                      {dynamicData.emphasisQuestion}
+                    <p className="text-sm text-muted-foreground">
+                      为了保证生成质量，我需要向您确认更多需求细节
                     </p>
-                    <textarea
-                      value={keywords}
-                      onChange={(e) => setKeywords(e.target.value)}
-                      placeholder={
-                        dynamicData.emphasisPlaceholder ||
-                        "请输入您希望强调的关键词或内容..."
-                      }
-                      className="w-full px-3 py-2 text-sm border border-border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-primary/20"
-                      rows={3}
-                    />
-                  </div>
-                )}
 
-                {/* 操作按钮 */}
-                <div className="flex items-center justify-between pt-2">
-                  <div className="flex items-center gap-2">
-                    {autoConfirmCountdown !== null && (
-                      <span className="text-xs text-muted-foreground">
-                        {autoConfirmCountdown}秒后自动确认
-                      </span>
+                    {/* 受众选择 */}
+                    {dynamicData.audienceOptions &&
+                      dynamicData.audienceOptions.length > 0 && (
+                        <div>
+                          <p className="text-sm mb-2.5">
+                            {dynamicData.audienceQuestion ||
+                              `这份PPT的目标受众是？`}
+                            <span className="text-muted-foreground ml-1">
+                              （单选）
+                            </span>
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {dynamicData.audienceOptions.map((opt) => (
+                              <button
+                                key={opt}
+                                onClick={() => setSelectedAudience(opt)}
+                                className={cn(
+                                  "px-4 py-1.5 rounded-full text-sm border transition-colors",
+                                  selectedAudience === opt
+                                    ? "border-primary bg-primary/10 text-primary"
+                                    : "border-border hover:border-primary/50"
+                                )}
+                              >
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                    {/* 内容模块选择 */}
+                    {dynamicData.modulesOptions &&
+                      dynamicData.modulesOptions.length > 0 && (
+                        <div>
+                          <p className="text-sm mb-2.5">
+                            {dynamicData.modulesQuestion ||
+                              `PPT中需要包含哪些内容模块？`}
+                            <span className="text-muted-foreground ml-1">
+                              （多选）
+                            </span>
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {dynamicData.modulesOptions.map((opt) => (
+                              <button
+                                key={opt}
+                                onClick={() => toggleModule(opt)}
+                                className={cn(
+                                  "px-4 py-1.5 rounded-full text-sm border transition-colors",
+                                  selectedModules.includes(opt)
+                                    ? "border-primary bg-primary/10 text-primary"
+                                    : "border-border hover:border-primary/50"
+                                )}
+                              >
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                    {/* 设计风格选择 */}
+                    {dynamicData.styleOptions &&
+                      dynamicData.styleOptions.length > 0 && (
+                        <div>
+                          <p className="text-sm mb-2.5">
+                            {dynamicData.styleQuestion ||
+                              `你期望的PPT设计风格是？`}
+                            <span className="text-muted-foreground ml-1">
+                              （单选）
+                            </span>
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {dynamicData.styleOptions.map((opt) => (
+                              <button
+                                key={opt}
+                                onClick={() => setSelectedStyle(opt)}
+                                className={cn(
+                                  "px-4 py-1.5 rounded-full text-sm border transition-colors",
+                                  selectedStyle === opt
+                                    ? "border-primary bg-primary/10 text-primary"
+                                    : "border-border hover:border-primary/50"
+                                )}
+                              >
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                    {/* 页数范围选择 */}
+                    {dynamicData.numPagesOptions &&
+                      dynamicData.numPagesOptions.length > 0 && (
+                        <div>
+                          <p className="text-sm mb-2.5">
+                            {dynamicData.numPagesQuestion ||
+                              `您期望的PPT页数范围是？`}
+                            <span className="text-muted-foreground ml-1">
+                              （单选）
+                            </span>
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {dynamicData.numPagesOptions.map((opt) => (
+                              <button
+                                key={opt}
+                                onClick={() => setSelectedNumPages(opt)}
+                                className={cn(
+                                  "px-4 py-1.5 rounded-full text-sm border transition-colors",
+                                  selectedNumPages === opt
+                                    ? "border-primary bg-primary/10 text-primary"
+                                    : "border-border hover:border-primary/50"
+                                )}
+                              >
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                    {/* 关键词输入 */}
+                    {dynamicData.emphasisQuestion && (
+                      <div>
+                        <p className="text-sm mb-2.5">
+                          {dynamicData.emphasisQuestion}
+                        </p>
+                        <textarea
+                          value={keywords}
+                          onChange={(e) => setKeywords(e.target.value)}
+                          placeholder={
+                            dynamicData.emphasisPlaceholder ||
+                            "请输入您希望强调的关键词或内容..."
+                          }
+                          className="w-full px-3 py-2 text-sm border border-border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-primary/20"
+                          rows={3}
+                        />
+                      </div>
                     )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        onCancelAutoConfirm();
-                        onConfirm({});
-                      }}
-                      className="px-4 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      跳过
-                    </button>
-                    <button
-                      onClick={handleConfirm}
-                      className="px-4 py-1.5 text-sm bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
-                    >
-                      确认
-                    </button>
-                  </div>
-                </div>
+
+                    {/* 操作按钮 */}
+                    <div className="flex items-center justify-between pt-2">
+                      <div className="flex items-center gap-2">
+                        {autoConfirmCountdown !== null && (
+                          <span className="text-xs text-muted-foreground">
+                            {autoConfirmCountdown}秒后自动确认
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            onCancelAutoConfirm();
+                            onConfirm({});
+                          }}
+                          className="px-4 py-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          跳过
+                        </button>
+                        <button
+                          onClick={handleConfirm}
+                          className="px-4 py-1.5 text-sm bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
+                        >
+                          确认
+                        </button>
+                      </div>
+                    </div>
                   </>
                 ) : (
                   // 已确认或已完成状态：显示只读信息

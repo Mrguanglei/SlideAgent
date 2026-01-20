@@ -8,6 +8,7 @@ interface DownloadPopoverProps {
     projectId: number;
     versionId?: number;
     title: string;
+    disabled?: boolean;
 }
 
 interface ExportItemProps {
@@ -49,7 +50,7 @@ function ExportItem({ id, name, icon, iconBgInfo, onDownload, isLoading, extraIn
     );
 }
 
-export default function DownloadPopover({ projectId, versionId, title }: DownloadPopoverProps) {
+export default function DownloadPopover({ projectId, versionId, title, disabled }: DownloadPopoverProps) {
     const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
 
     const handleExport = async (format: string, extension: string) => {
@@ -105,8 +106,12 @@ export default function DownloadPopover({ projectId, versionId, title }: Downloa
         <Popover>
             <PopoverTrigger asChild>
                 <button
-                    className="p-2 hover:bg-muted rounded-lg transition-colors outline-none"
-                    title="下载"
+                    disabled={disabled}
+                    className={cn(
+                        "p-2 hover:bg-muted rounded-lg transition-colors outline-none",
+                        disabled && "opacity-50 cursor-not-allowed"
+                    )}
+                    title={disabled ? "正在运行不可操作" : "下载"}
                 >
                     <Download className="h-4 w-4 text-muted-foreground" />
                 </button>

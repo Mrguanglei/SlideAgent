@@ -58,13 +58,16 @@ from services.task_planner import (
     check_ppt_intent,
     generate_supplement_info_with_llm,
     stream_task_plan_with_llm,
-    stream_outline_generation
+    stream_outline_generation,
+    analyze_user_intent_for_paused_session
 )
 from services.ppt_generator import (
     create_tool_call,
     parse_num_pages,
     run_slide_design_agent
 )
+from services.resource_inliner import inline_all_resources
+from services.html_staticizer import staticize_html
 
 
 # ==================== 应用生命周期 ====================
@@ -145,11 +148,6 @@ class ConfirmRequest(BaseModel):
     supplement_data: Dict[str, Any]
 
 
-# ==================== 内存会话存储（临时，后续迁移到数据库） ====================
-
-sessions: Dict[str, Dict[str, Any]] = {}
-
-
 # ==================== 核心流式生成函数 ====================
 
 async def stream_ppt_generation(
@@ -165,19 +163,54 @@ async def stream_ppt_generation(
     powerpoint_type: str = "16:9 Widescreen",
     convert_type: str = "slide_design",
     db: Optional[AsyncSession] = None,
+    save_user_message: bool = True,
 ):
     """流式生成 PPT 的核心函数"""
+    logger.info(f"[stream_ppt_generation] START - session={session_id}, conversation={conversation_id}")
+    logger.info(f"[stream_ppt_generation] instruction={instruction}, supplement_data={supplement_data}")
 
     # 如果是新创建的对话，发送 conversation_created 事件
     if is_new_conversation and conversation_uuid:
+        logger.info(f"[stream_ppt_generation] Sending conversation_created event")
         yield f"data: {json.dumps({'type': 'conversation_created', 'conversation_id': conversation_id, 'conversation_uuid': conversation_uuid}, ensure_ascii=False)}\n\n"
 
-    # 获取或创建会话
-    if session_id not in sessions:
-        sessions[session_id] = {
+    # 从数据库获取或创建会话
+    session = None
+    if db:
+        existing_session = await crud.get_session(db, session_id)
+        if existing_session:
+            session = {
+                "topic": existing_session.topic,
+                "stage": existing_session.stage,
+                "search_results": existing_session.search_results or [],
+                "outline_content": existing_session.outline_content or "",
+                "deep_thinking_content": existing_session.deep_thinking_content or "",
+                "supplement_data": existing_session.supplement_data or {},
+                "conversation_id": existing_session.conversation_id or conversation_id,
+            }
+            # 更新任务状态为 running
+            await crud.update_session(db, session_id, task_status="running")
+            await db.commit()
+        else:
+            # 创建新 session，状态为 running
+            await crud.create_session(
+                db, session_id, instruction, conversation_id, stage="init", task_status="running"
+            )
+            await db.commit()
+            session = {
+                "topic": instruction,
+                "stage": "init",
+                "search_results": [],
+                "outline_content": "",
+                "deep_thinking_content": "",
+                "supplement_data": supplement_data or {},
+                "conversation_id": conversation_id,
+            }
+    else:
+        # 没有数据库连接时使用临时会话（兜底）
+        session = {
             "topic": instruction,
             "stage": "init",
-            "messages": [],
             "search_results": [],
             "outline_content": "",
             "deep_thinking_content": "",
@@ -185,20 +218,30 @@ async def stream_ppt_generation(
             "conversation_id": conversation_id,
         }
     
-    session = sessions[session_id]
-    
-    # 如果提供了 supplement_data，更新会话
-    if supplement_data:
+    # 如果提供了 supplement_data，更新会话（即使是空字典也要更新）
+    if supplement_data is not None:
+        logger.info(f"[stream_ppt_generation] Updating session with supplement_data: {supplement_data}")
         session["supplement_data"] = supplement_data
         session["stage"] = "confirmed"
+        if db:
+            await crud.update_session(
+                db, session_id, 
+                stage="confirmed", 
+                supplement_data=supplement_data
+            )
+            await db.commit()
+        logger.info(f"[stream_ppt_generation] Session stage updated to 'confirmed'")
     
-    # 保存用户消息到数据库
-    if db and conversation_id:
+    # 保存用户消息到数据库（只在需要时保存，避免重复）
+    if db and conversation_id and save_user_message:
         try:
+            logger.info(f"[stream_ppt_generation] Saving user message to database")
             await crud.create_message(db, conversation_id, "user", instruction)
             await db.commit()
         except Exception as e:
             logger.error(f"Failed to save user message: {e}")
+    elif not save_user_message:
+        logger.info(f"[stream_ppt_generation] Skipping user message save (already saved)")
     
     # ==================== 阶段 1: 检查 PPT 意图 ====================
     
@@ -230,6 +273,11 @@ async def stream_ppt_generation(
                     await db.commit()
                 except Exception as e:
                     logger.error(f"Failed to save assistant message: {e}")
+
+            # 更新数据库中的 session 状态（任务完成）
+            if db:
+                await crud.update_session(db, session_id, task_status="completed")
+                await db.commit()
 
             # 发送完成事件
             yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
@@ -289,11 +337,16 @@ async def stream_ppt_generation(
                 logger.error(f"Failed to save supplement info: {e}")
         
         session["stage"] = "waiting_supplement"
+        # 更新数据库中的 session 状态
+        if db:
+            await crud.update_session(db, session_id, stage="waiting_supplement")
+            await db.commit()
         return
     
     # ==================== 阶段 3: 任务规划 ====================
     
     if session["stage"] == "confirmed":
+        logger.info(f"[stream_ppt_generation] Entering confirmed stage, starting task planning")
         # 发送任务规划工具调用
         task_plan_data = None
         task_plan_content = ""
@@ -349,6 +402,10 @@ async def stream_ppt_generation(
                 logger.error(f"Failed to save task plan: {e}")
         
         session["stage"] = "searching"
+        # 更新数据库中的 session 状态
+        if db:
+            await crud.update_session(db, session_id, stage="searching")
+            await db.commit()
     
     # ==================== 阶段 4: 搜索 ====================
     
@@ -453,6 +510,14 @@ async def stream_ppt_generation(
         
         session["search_results"] = all_search_results
         session["stage"] = "deep_thinking"
+        # 更新数据库中的 session 状态和搜索结果
+        if db:
+            await crud.update_session(
+                db, session_id, 
+                stage="deep_thinking",
+                search_results=all_search_results
+            )
+            await db.commit()
     
     # ==================== 阶段 5: 深度思考 ====================
 
@@ -516,6 +581,15 @@ async def stream_ppt_generation(
                 logger.error(f"Failed to save deep thinking: {e}")
 
         session["stage"] = "outline"
+        session["deep_thinking_content"] = deep_thinking_content
+        # 更新数据库中的 session 状态
+        if db:
+            await crud.update_session(
+                db, session_id,
+                stage="outline",
+                deep_thinking_content=deep_thinking_content
+            )
+            await db.commit()
     
     # ==================== 阶段 6: 生成大纲 ====================
     
@@ -567,7 +641,16 @@ async def stream_ppt_generation(
                 logger.error(f"Failed to save outline: {e}")
         
         session["stage"] = "generating"
+        session["outline_content"] = outline_content
         logger.info(f"[Stage 6 Complete] Outline generated, moving to stage 7 (generating)")
+        # 更新数据库中的 session 状态
+        if db:
+            await crud.update_session(
+                db, session_id,
+                stage="generating",
+                outline_content=outline_content
+            )
+            await db.commit()
 
     # ==================== 阶段 7: 生成 PPT ====================
 
@@ -593,18 +676,7 @@ async def stream_ppt_generation(
         
         # 运行 SlideDesign agent
         slide_count = 0
-        thinking_messages = []  # 收集所有 thinking 消息
-        
-        # 在生成PPT之前创建一条assistant消息，所有幻灯片工具调用都关联到这条消息
-        ppt_generation_message = None
-        if db and conversation_id:
-            try:
-                ppt_generation_message = await crud.create_message(
-                    db, conversation_id, "assistant", "正在生成PPT幻灯片..."
-                )
-                await db.commit()
-            except Exception as e:
-                logger.error(f"Failed to create PPT generation message: {e}")
+
         
         async for event in run_slide_design_agent(
             topic=instruction,
@@ -621,6 +693,24 @@ async def stream_ppt_generation(
                 slide_count = event["slide_count"]
                 html_content = event["html_content"]
                 description = event.get("description", f"第 {slide_count} 页")
+                
+                # 内联外部资源（图片等）
+                try:
+                    logger.info(f"[Stage 7] Inlining resources for slide {slide_count}...")
+                    html_content = await inline_all_resources(html_content, timeout=30)
+                    logger.info(f"[Stage 7] Resources inlined for slide {slide_count}")
+                except Exception as e:
+                    logger.error(f"[Stage 7] Failed to inline resources for slide {slide_count}: {e}")
+                    # 内联失败不影响整体流程，继续使用原 HTML
+                
+                # 静态化 HTML（将动态内容转换为静态内容）
+                try:
+                    logger.info(f"[Stage 7] Staticizing HTML for slide {slide_count}...")
+                    html_content = await staticize_html(html_content, timeout=30)
+                    logger.info(f"[Stage 7] HTML staticized for slide {slide_count}")
+                except Exception as e:
+                    logger.error(f"[Stage 7] Failed to staticize HTML for slide {slide_count}: {e}")
+                    # 静态化失败不影响整体流程，继续使用原 HTML
 
                 # 发送幻灯片工具调用事件
                 slide_tool_data = {
@@ -655,11 +745,15 @@ async def stream_ppt_generation(
                     except Exception as e:
                         logger.error(f"Failed to save slide: {e}")
 
-                # 保存幻灯片工具调用到数据库（关联到同一条消息）
-                if db and ppt_generation_message:
+                # 保存幻灯片工具调用到数据库（创建独立消息）
+                if db and conversation_id:
                     try:
+                        # 为每个幻灯片创建一条独立消息，模拟流式输出
+                        slide_msg = await crud.create_message(
+                            db, conversation_id, "assistant", ""  # 内容为空，仅作为工具调用的载体
+                        )
                         await crud.create_tool_call(
-                            db, ppt_generation_message.id, "ppt_generate", f'创建幻灯片 {slide_count}', "completed",
+                            db, slide_msg.id, "ppt_generate", f'创建幻灯片 {slide_count}', "completed",
                             result_json={
                                 "pageNumber": slide_count,
                                 "html": html_content,
@@ -671,7 +765,15 @@ async def stream_ppt_generation(
                         logger.error(f"Failed to save ppt_generate tool call: {e}")
 
             elif event_type == "thinking":
-                thinking_messages.append(event["content"])
+                # thinking_messages.append(event["content"])  # 不再收集，直接保存
+                
+                # 保存思考消息到数据库（独立消息）
+                if db and conversation_id:
+                    try:
+                        await crud.create_message(db, conversation_id, "assistant", event["content"])
+                        await db.commit()
+                    except Exception as e:
+                        logger.error(f"Failed to save thinking message: {e}")
                 thinking_data = {
                     'type': 'message',
                     'role': 'assistant',
@@ -727,30 +829,85 @@ async def stream_ppt_generation(
                 }
                 yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
 
-        # 保存所有 thinking 消息到数据库
-        if db and conversation_id and thinking_messages:
-            try:
-                # 合并所有 thinking 消息为一条
-                combined_thinking = "\n".join(thinking_messages)
-                await crud.create_message(db, conversation_id, "assistant", combined_thinking)
-                await db.commit()
-            except Exception as e:
-                logger.error(f"Failed to save thinking messages: {e}")
+
 
         session["stage"] = "completed"
+        # 更新数据库中的 session 状态（任务完成）
+        if db:
+            await crud.update_session(db, session_id, stage="completed", task_status="completed")
+            await db.commit()
+        
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
 
 # ==================== API 端点 ====================
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
-    """聊天接口 - 流式返回"""
+    """聊天接口 - 流式返回（支持暂停恢复和上下文理解）"""
     logger.info(f"Chat endpoint called: {request.instruction[:50]}...")
     
     session_id = request.session_id or str(uuid.uuid4())
     conversation_id = request.conversation_id
     conversation_uuid = None
     is_new_conversation = False
+    effective_instruction = request.instruction
+
+    # 检查是否有关联的已暂停 session（通过 conversation_id）
+    if conversation_id:
+        existing_session = await crud.get_session_by_conversation(db, conversation_id)
+        if existing_session and existing_session.task_status == "paused":
+            logger.info(f"Found paused session for conversation {conversation_id}, analyzing intent...")
+            
+            # 分析用户意图
+            intent_result = await analyze_user_intent_for_paused_session(
+                user_message=request.instruction,
+                current_topic=existing_session.topic,
+                current_stage=existing_session.stage,
+                supplement_data=existing_session.supplement_data
+            )
+            
+            action = intent_result.get("action", "resume")
+            new_topic = intent_result.get("new_topic", existing_session.topic)
+            
+            logger.info(f"Intent analysis: action={action}, new_topic={new_topic}")
+            
+            if action == "restart":
+                # 完全重新开始：重置 session
+                logger.info(f"Restarting session with new topic: {new_topic}")
+                effective_instruction = new_topic or request.instruction
+                await crud.update_session(
+                    db, existing_session.id,
+                    topic=effective_instruction,
+                    stage="init",
+                    task_status="running",
+                    supplement_data=None,
+                    search_results=None,
+                    outline_content=None,
+                    deep_thinking_content=None
+                )
+                await db.commit()
+                session_id = existing_session.id
+                
+            elif action == "adjust":
+                # 调整后继续：更新主题但保留已有数据
+                logger.info(f"Adjusting topic to: {new_topic}")
+                effective_instruction = new_topic or request.instruction
+                await crud.update_session(
+                    db, existing_session.id,
+                    topic=effective_instruction,
+                    task_status="running"
+                )
+                await db.commit()
+                session_id = existing_session.id
+                
+            else:  # resume
+                # 直接恢复：使用现有状态继续
+                logger.info(f"Resuming from stage: {existing_session.stage}")
+                effective_instruction = existing_session.topic
+                await crud.update_session(db, existing_session.id, task_status="running")
+                await db.commit()
+                session_id = existing_session.id
 
     # 如果没有 conversation_id，创建新对话
     if not conversation_id:
@@ -767,7 +924,7 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
 
     return StreamingResponse(
         stream_ppt_generation(
-            instruction=request.instruction,
+            instruction=effective_instruction,
             session_id=session_id,
             conversation_id=conversation_id,
             conversation_uuid=conversation_uuid,
@@ -812,35 +969,37 @@ async def confirm(request: ConfirmRequest, db: AsyncSession = Depends(get_db)):
         session_id = str(uuid.uuid4())
         logger.info(f"Generated new session_id: {session_id}")
 
-    # 如果 session 不存在，说明是历史对话，不允许确认
-    if session_id not in sessions:
+    # 从数据库获取 session
+    db_session = await crud.get_session(db, session_id)
+    if not db_session:
         logger.warning(f"Session {session_id} not found, rejecting confirmation from history")
         raise HTTPException(
             status_code=400,
             detail="无法确认历史对话，请创建新对话"
         )
 
-    session = sessions[session_id]
-
     # 检查 session 状态是否允许确认
-    if session.get("stage") != "waiting_supplement":
-        logger.warning(f"Session {session_id} is in stage {session.get('stage')}, not waiting_supplement")
+    if db_session.stage != "waiting_supplement":
+        logger.warning(f"Session {session_id} is in stage {db_session.stage}, not waiting_supplement")
         raise HTTPException(
             status_code=400,
-            detail=f"当前状态不允许确认（状态：{session.get('stage')}）"
+            detail=f"当前状态不允许确认（状态：{db_session.stage}）"
         )
 
-    conversation_id = request.conversation_id or session.get("conversation_id")
+    conversation_id = request.conversation_id or db_session.conversation_id
+    session_topic = db_session.topic
 
     # 从 supplement_data 中提取 AI 生成的主题（如果有）
     generated_topic = request.supplement_data.get("topic")
-    if generated_topic and generated_topic != session["topic"]:
-        logger.info(f"Using AI-generated topic: {generated_topic} (original: {session['topic']})")
+    if generated_topic and generated_topic != session_topic:
+        logger.info(f"Using AI-generated topic: {generated_topic} (original: {session_topic})")
         # 更新 session 中的 topic
-        session["topic"] = generated_topic
+        session_topic = generated_topic
+        await crud.update_session(db, session_id, topic=generated_topic)
+        await db.commit()
 
         # 更新对话标题
-        if conversation_id and db:
+        if conversation_id:
             try:
                 await crud.update_conversation_title(db, conversation_id, generated_topic)
                 await db.commit()
@@ -849,7 +1008,7 @@ async def confirm(request: ConfirmRequest, db: AsyncSession = Depends(get_db)):
                 logger.error(f"Failed to update conversation title: {e}")
 
     # 更新补充信息工具调用的状态为 confirmed
-    if conversation_id and db:
+    if conversation_id:
         try:
             # 获取该对话的所有消息
             messages = await crud.get_messages_by_conversation(db, conversation_id)
@@ -873,13 +1032,18 @@ async def confirm(request: ConfirmRequest, db: AsyncSession = Depends(get_db)):
             logger.error(f"Failed to update tool call status: {e}")
 
     # 返回流式响应继续生成
+    logger.info(f"Starting stream_ppt_generation for session {session_id}, conversation {conversation_id}")
+    logger.info(f"Topic: {session_topic}")
+    logger.info(f"Supplement data: {request.supplement_data}")
+    
     return StreamingResponse(
         stream_ppt_generation(
-            instruction=session["topic"],
+            instruction=session_topic,
             session_id=session_id,
             conversation_id=conversation_id,
             supplement_data=request.supplement_data,
             db=db,
+            save_user_message=False,  # 用户消息已在初始请求中保存，不需要重复保存
         ),
         media_type="text/event-stream",
         headers={
@@ -887,6 +1051,36 @@ async def confirm(request: ConfirmRequest, db: AsyncSession = Depends(get_db)):
             "Connection": "keep-alive",
         }
     )
+
+
+@app.post("/api/sessions/{session_id}/pause")
+async def pause_session(session_id: str, db: AsyncSession = Depends(get_db)):
+    """暂停正在运行的任务"""
+    logger.info(f"Pause session request: {session_id}")
+    
+    # 获取 session
+    session = await crud.get_session(db, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # 只有 running 状态才能暂停
+    if session.task_status != "running":
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot pause session in {session.task_status} status"
+        )
+    
+    # 更新状态为 paused
+    await crud.update_session(db, session_id, task_status="paused")
+    await db.commit()
+    
+    logger.info(f"Session {session_id} paused at stage {session.stage}")
+    return {
+        "status": "ok",
+        "session_id": session_id,
+        "task_status": "paused",
+        "stage": session.stage
+    }
 
 
 @app.get("/api/health")

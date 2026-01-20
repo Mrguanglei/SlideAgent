@@ -4,11 +4,11 @@
 
 **SlideAgent** 是一款开源的 AI 驱动的演示文稿生成工具。只需输入您的想法，即可自动生成精美的 PPT，支持多种导出格式和在线分享。
 
-# 创作不易，多多Star ✨ ✨ ✨ ✨ ✨
+##### 创作不易，多多Star ✨ ✨ ✨ ✨ ✨
 
 ![PPTAgent主页](images/home.png)
 
-## ⚠️注意：本项目是基于[PPTAgent (CAS)](https://github.com/icip-cas/PPTAgent)此开源项目二次开发,代码部分依旧保持 PPTAgent命名
+#### ⚠️注意：本项目是基于[PPTAgent (CAS)](https://github.com/icip-cas/PPTAgent)此开源项目二次开发,代码部分依旧保持 PPTAgent命名
 
 ## ✨ 主要功能
 
@@ -20,14 +20,16 @@
 | **知识库** | ✅ | 上传文档，基于知识库内容生成 PPT |
 | **任务队列** | ✅ | 批量上传文档，后端自动排队处理 |
 
-## ✨ TODO
+## ✨ 已完成
 
 - [x] **内容编辑** - 直接在预览页面编辑文本内容
 - [x] **在线预览** - 在浏览器中实时预览 PPT 效果
 - [x] **下载导出** - 支持导出为 PDF、HTML、PPTX 格式. Note:PPTX样式会丢失，正在处理
+- [x] **状态管理** - Agent任务状态全局持久化设计
+## ✨ TODO
 - [ ] **对话式编辑** - 通过对话持续修改和优化 PPT 内容
+- [ ] **数据库搜索工具** - 调用知识库工具
 - [ ] **多版本管理** - 保存历史版本，随时回滚和比较
-- [ ] **状态管理** - Agent任务状态全局持久化设计
 
 ## 🚀 快速开始
 
@@ -67,6 +69,8 @@
 | ![主页](images/home.png) | ![对话生成](images/chat.png) |
 | **知识库** | **全局搜索** |
 | ![知识库](images/knowledge.png) | ![全局搜索](images/search.png) |
+| **在线编辑** | **多种下载** |
+| ![在线编辑](images/editor.png) | ![多种下载](images/download.png) |
 
 
 ## 🛠️ 项目结构

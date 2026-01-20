@@ -1,5 +1,5 @@
 """
-PPTAgent 数据库模型定义
+SlideAgent 数据库模型定义
 
 表结构：
 - conversations: 对话表
@@ -11,6 +11,7 @@ PPTAgent 数据库模型定义
 - ppt_projects: PPT项目表
 - ppt_versions: PPT版本表
 - ppt_slides: 幻灯片表
+- sessions: 会话状态表（PPT生成流程状态）
 """
 
 from datetime import datetime
@@ -18,7 +19,7 @@ from typing import Optional, List
 import uuid as uuid_lib
 from sqlalchemy import (
     Column, Integer, BigInteger, String, Text, DateTime,
-    ForeignKey, JSON, Boolean, Index
+    ForeignKey, JSON, Boolean, Index, LargeBinary
 )
 from sqlalchemy.orm import relationship, DeclarativeBase
 from sqlalchemy.sql import func
@@ -37,6 +38,7 @@ class Conversation(Base):
     uuid = Column(String(36), unique=True, nullable=False, index=True, default=lambda: str(uuid_lib.uuid4()))  # UUID 标识符
     user_id = Column(String(100), nullable=True, index=True, default="default_user")  # 用户 ID
     title = Column(String(255), nullable=False, default="新对话")
+    task_status = Column(String(20), nullable=False, default="idle")  # idle, running, paused, completed (同步自 Session)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -323,3 +325,72 @@ class Share(Base):
         Index("idx_share_conversation", "conversation_id"),
         Index("idx_share_expires", "expires_at"),
     )
+
+
+# ==================== 会话状态表 ====================
+
+class Session(Base):
+    """
+    会话状态表 - 存储 PPT 生成流程的会话状态
+    
+    用于在后端重启后恢复用户的 PPT 生成进度，解决内存中 session 数据丢失的问题。
+    
+    stage 状态流转（流程阶段）：
+    - init: 初始状态，检查 PPT 意图
+    - supplement_info: 生成补充信息选项
+    - waiting_supplement: 等待用户确认补充信息
+    - confirmed: 用户已确认，进入任务规划
+    - searching: 搜索网页信息
+    - deep_thinking: 深度思考分析
+    - outline: 生成 PPT 大纲
+    - generating: 生成 PPT 幻灯片
+    - completed: 生成完成
+    
+    task_status 任务状态：
+    - idle: 空闲，等待用户输入
+    - running: 正在执行 Agent 任务
+    - paused: 用户暂停或意外中断
+    - completed: 任务完成
+    """
+    __tablename__ = "sessions"
+
+    id = Column(String(36), primary_key=True)  # UUID，与前端传递的 session_id 对应
+    conversation_id = Column(BigInteger, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True, index=True)
+    topic = Column(Text, nullable=False)  # 用户输入的主题/指令
+    stage = Column(String(50), nullable=False, default="init")
+    task_status = Column(String(20), nullable=False, default="idle")  # idle, running, paused, completed
+    supplement_data = Column(JSON, nullable=True)  # 用户确认的补充信息
+    search_results = Column(JSON, nullable=True)  # 搜索结果（JSON 数组）
+    outline_content = Column(Text, nullable=True)  # PPT 大纲内容
+    deep_thinking_content = Column(Text, nullable=True)  # 深度思考内容
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # 关系
+    conversation = relationship("Conversation", backref="sessions")
+
+    __table_args__ = (
+        Index("idx_session_conversation", "conversation_id"),
+        Index("idx_session_stage", "stage"),
+        Index("idx_session_task_status", "task_status"),
+    )
+
+
+class PPTExport(Base):
+    """PPT 导出记录表 - 用于缓存导出文件"""
+    __tablename__ = "ppt_exports"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    project_id = Column(BigInteger, ForeignKey("ppt_projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    version_id = Column(BigInteger, ForeignKey("ppt_versions.id", ondelete="CASCADE"), nullable=False, index=True)
+    format = Column(String(20), nullable=False)  # pdf, html, pptx, images
+    file_path = Column(String(500), nullable=True)  # 改为可选，因为文件现在存储在数据库中
+    filename = Column(String(255), nullable=False)
+    file_size = Column(BigInteger, default=0)
+    file_data = Column(LargeBinary, nullable=True)  # 存储文件的二进制数据
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("idx_export_version_format", "version_id", "format"),
+    )
+

@@ -41,6 +41,7 @@ class ConversationResponse(BaseModel):
     title: Optional[str]
     created_at: datetime
     updated_at: datetime
+    task_status: Optional[str] = "idle"  # 任务状态
 
     class Config:
         from_attributes = True
@@ -82,16 +83,41 @@ class ConversationDetailResponse(BaseModel):
 
 # ==================== API Endpoints ====================
 
-@router.get("", response_model=List[ConversationResponse])
+@router.get("")
 async def list_conversations(
     user_id: str = "default_user",
     skip: int = 0,
     limit: int = 50,
     db: AsyncSession = Depends(get_db)
 ):
-    """获取对话列表（侧边栏用）"""
+    """获取对话列表（侧边栏用）- 包含任务状态"""
     conversations = await crud.get_conversations(db, user_id=user_id, skip=skip, limit=limit)
-    return conversations
+    
+    # 为每个对话查询关联的 session 获取 task_status
+    result = []
+    for conv in conversations:
+        conv_dict = {
+            "id": conv.id,
+            "uuid": conv.uuid,
+            "user_id": conv.user_id,
+            "title": conv.title,
+            "created_at": conv.created_at.isoformat() if conv.created_at else None,
+            "updated_at": conv.updated_at.isoformat() if conv.updated_at else None,
+            "task_status": "idle",  # 默认状态
+        }
+        
+        # 查询对话的 session 获取 task_status
+        session = await crud.get_session_by_conversation(db, conv.id)
+        if session:
+            conv_dict["task_status"] = session.task_status
+        
+        # 检查是否有 PPT 项目
+        ppt_project = await crud.get_ppt_project_by_conversation(db, conv.id)
+        conv_dict["has_ppt"] = ppt_project is not None
+        
+        result.append(conv_dict)
+    
+    return result
 
 
 @router.post("", response_model=ConversationResponse)
@@ -118,6 +144,10 @@ async def get_conversation(
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
+    # 获取 Session 状态
+    session = await crud.get_session_by_conversation(db, conversation_id)
+    task_status = session.task_status if session else "idle"
+
     # 获取消息列表
     messages = await crud.get_messages(db, conversation_id)
 
@@ -218,7 +248,8 @@ async def get_conversation(
             "user_id": conversation.user_id,
             "title": conversation.title,
             "created_at": conversation.created_at.isoformat(),
-            "updated_at": conversation.updated_at.isoformat()
+            "updated_at": conversation.updated_at.isoformat(),
+            "task_status": task_status
         },
         "messages": messages_with_tools,
         "ppt_project": ppt_project_dict
@@ -238,6 +269,10 @@ async def get_conversation_by_uuid(
     # 使用 conversation.id 获取其他数据
     conversation_id = conversation.id
 
+    # 获取 Session 状态
+    session = await crud.get_session_by_conversation(db, conversation_id)
+    task_status = session.task_status if session else "idle"
+
     # 获取消息列表
     messages = await crud.get_messages(db, conversation_id)
 
@@ -340,6 +375,8 @@ async def get_conversation_by_uuid(
             "created_at": conversation.created_at.isoformat(),
             "updated_at": conversation.updated_at.isoformat()
         },
+        "session_id": session.id if session else None,
+        "task_status": task_status,
         "messages": messages_with_tools,
         "ppt_project": ppt_project_dict
     }

@@ -60,6 +60,72 @@ async def check_ppt_intent(instruction: str) -> bool:
         return any(kw in instruction.lower() for kw in keywords)
 
 
+async def analyze_user_intent_for_paused_session(
+    user_message: str, 
+    current_topic: str,
+    current_stage: str,
+    supplement_data: dict = None
+) -> dict:
+    """
+    分析暂停后用户发送的消息，判断用户意图
+    
+    返回:
+    - action: "restart" | "adjust" | "resume"
+    - new_topic: 如果是 restart 或 adjust，返回新主题
+    - adjustment: 如果是 adjust，返回调整说明
+    """
+    logger.info(f"Analyzing user intent for paused session: {user_message[:50]}...")
+    
+    # 快速判断明确的继续意图
+    continue_keywords = ["继续", "恢复", "接着", "go on", "continue", "resume", "没问题", "好的继续", "确定"]
+    if any(kw in user_message.lower() for kw in continue_keywords) and len(user_message) < 20:
+        return {"action": "resume", "new_topic": current_topic}
+    
+    # 快速判断明确的重新开始意图
+    restart_keywords = ["换个主题", "重新开始", "换一个", "不要这个", "改成", "算了", "从头开始"]
+    if any(kw in user_message.lower() for kw in restart_keywords):
+        # 提取新主题
+        new_topic = user_message
+        for kw in restart_keywords:
+            new_topic = new_topic.replace(kw, "").strip()
+        if not new_topic or len(new_topic) < 3:
+            new_topic = None
+        return {"action": "restart", "new_topic": new_topic}
+    
+    # 使用 LLM 判断复杂意图
+    try:
+        prompt = f"""你是一个PPT制作助手的意图分析模块。用户之前正在制作一份关于"{current_topic}"的PPT，目前处于{current_stage}阶段，但任务被暂停了。
+
+用户现在发送了新消息："{user_message}"
+
+请分析用户的意图，返回JSON格式：
+
+如果用户想**完全更换主题**（制作一个全新的PPT）：
+{{"action": "restart", "new_topic": "新主题内容"}}
+
+如果用户想**调整当前主题**（深入某个方向、调整侧重点等，但还是这个主题）：
+{{"action": "adjust", "new_topic": "调整后的主题", "adjustment": "调整说明"}}
+
+如果用户想**继续执行**（无需修改，继续之前的任务）：
+{{"action": "resume", "new_topic": "{current_topic}"}}
+
+请只输出JSON，不要有其他内容。"""
+
+        response = await call_llm_api([
+            {"role": "system", "content": "你是一个意图分析助手，善于理解用户在对话上下文中的真实意图。请只输出JSON格式的结果。"},
+            {"role": "user", "content": prompt}
+        ])
+        
+        response = clean_json_response(response)
+        result = json.loads(response)
+        logger.info(f"LLM intent analysis result: {result}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Intent analysis failed: {e}, defaulting to resume")
+        return {"action": "resume", "new_topic": current_topic}
+
+
 async def generate_supplement_info_with_llm(topic: str) -> dict:
     """使用 LLM 分析用户意图，动态生成补充信息选项"""
     logger.info(f"Using LLM to analyze topic: {topic}")

@@ -7,6 +7,7 @@ export interface Message {
   content: string;
   timestamp: number;
   toolCalls?: ToolCall[];
+  tool_calls?: any[]; // 为了兼容后端返回的原始数据
   isDeepThinking?: boolean;
   deepThinkingContent?: string;
   streaming?: boolean; // 是否正在流式输出
@@ -25,13 +26,13 @@ export interface ToolCall {
 export interface ToolCallData {
   // 通用字段
   query?: string;
-  
+
   // 任务规划
   taskPlan?: TaskPlan;
-  
+
   // 搜索相关
   searchRounds?: SearchRound[];
-  
+
   // 补充信息
   audienceQuestion?: string;
   audienceOptions?: string[];
@@ -41,13 +42,13 @@ export interface ToolCallData {
   styleOptions?: string[];
   numPagesQuestion?: string;
   numPagesOptions?: string[];
-  
+
   // PPT 相关
   outline?: string;
   slideTitle?: string;
   slideIndex?: number;
   htmlCode?: string;
-  
+
   [key: string]: unknown;
 }
 
@@ -104,6 +105,7 @@ export interface PPTProject {
   updated_at: string;
   versions?: PPTVersion[];
   current_version?: PPTVersion;
+  slides?: any[]; // 为了兼容后端返回的原始数据
 }
 
 // PPT 版本
@@ -138,6 +140,7 @@ export interface Conversation {
   updated_at: string;
   message_count?: number;
   has_ppt?: boolean;
+  task_status?: "idle" | "running" | "paused" | "completed";  // 任务状态
 }
 
 // 右侧面板类型
