@@ -136,6 +136,15 @@ export default function DownloadPopover({ projectId, versionId, title }: Downloa
                         isLoading={loadingMap["html"]}
                     />
                     <ExportItem
+                        id="images"
+                        name="图片打包"
+                        icon={<Download className="h-5 w-5 text-blue-600" />}
+                        iconBgInfo="bg-blue-100"
+                        onDownload={() => handleExport("images", ".zip")}
+                        isLoading={loadingMap["images"]}
+                        extraInfo="每页导出为PNG图片，打包成ZIP"
+                    />
+                    <ExportItem
                         id="pptx"
                         name="PPT文件"
                         icon={<FileSliders className="h-5 w-5 text-orange-600" />}

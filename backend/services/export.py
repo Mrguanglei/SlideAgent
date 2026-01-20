@@ -17,6 +17,7 @@ PPTAgent 导出服务模块
   - 添加导出质量报告
   - 优化 Playwright 等待时间
   - 优化字体处理
+- 2026-01-20 修复了pdf 和 html 下载样式丢失的问题
 """
 
 import os
@@ -62,35 +63,88 @@ class PPTExporter:
         title: str = "presentation"
     ) -> Tuple[str, str]:
         """
-        导出 PDF (使用 Playwright 替代 WeasyPrint 以获得更好的样式支持)
+        导出 PDF - 使用 iframe 隔离方案，与 HTML 导出保持一致
+        
+        方案：
+        1. 生成与 HTML 导出相同的 iframe 结构
+        2. 使用 Playwright 渲染并打印为 PDF
         """
+        import html as html_module
+        
         try:
-            # 生成唯一文件名
             filename = f"{title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
             filepath = EXPORT_DIR / filename
             
-            # 使用 Playwright 打印 PDF
+            # 构建 iframe 版本的 HTML（与 HTML 导出相同的结构）
+            slides_content = []
+            for i, slide_html in enumerate(slides_html):
+                full_slide_html = self._ensure_slide_dependencies(slide_html)
+                escaped_html = html_module.escape(full_slide_html)
+                
+                slides_content.append(f'''
+                    <div class="slide-page">
+                        <iframe 
+                            srcdoc="{escaped_html}"
+                            class="slide-frame"
+                            frameborder="0"
+                            scrolling="no"
+                        ></iframe>
+                    </div>
+                ''')
+            
+            # PDF 专用的 HTML 模板（每页一个幻灯片，分页打印）
+            pdf_html = f'''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        body {{
+            background: white;
+        }}
+        .slide-page {{
+            width: {self.slide_width}px;
+            height: {self.slide_height}px;
+            page-break-after: always;
+            overflow: hidden;
+            position: relative;
+        }}
+        .slide-page:last-child {{
+            page-break-after: auto;
+        }}
+        .slide-frame {{
+            width: 100%;
+            height: 100%;
+            border: none;
+            display: block;
+        }}
+    </style>
+</head>
+<body>
+    {''.join(slides_content)}
+</body>
+</html>'''
+            
             async with async_playwright() as p:
                 browser = await p.chromium.launch(
                     headless=True,
                     args=['--no-sandbox', '--disable-setuid-sandbox']
                 )
                 
-                # 预渲染幻灯片 (解决图表和 ID 冲突问题)
-                logger.info("Pre-rendering slides for PDF export...")
-                processed_slides = await self._prerender_slides(browser, slides_html)
-                
-                # 合并所有预渲染后的幻灯片为一个 HTML 文档
-                combined_html = self._create_pdf_html(processed_slides)
-                
                 page = await browser.new_page()
                 
-                # 设置 HTML 内容 (使用 processed_slides，内容已经是静态的)
-                # 因为已经是静态内容，wait_until="load" 应该很快，timeout 留足
-                await page.set_content(combined_html, wait_until="load", timeout=60000)
+                # 加载 HTML
+                await page.set_content(pdf_html, wait_until="load", timeout=60000)
                 
-                # 配置 PDF 选项 (匹配幻灯片尺寸)
-                # 注意: Chrome 打印边距可能会影响精确匹配，设置 print_background=True
+                # 等待 iframe 内容加载完成
+                # iframe 需要额外时间加载外部资源
+                await page.wait_for_timeout(5000)
+                
+                # 打印 PDF
                 await page.pdf(
                     path=str(filepath),
                     width=f"{self.slide_width}px",
@@ -108,6 +162,73 @@ class PPTExporter:
         except Exception as e:
             logger.error(f"Failed to export PDF: {e}")
             raise
+    
+    def _create_single_slide_html(self, slide_html: str) -> str:
+        """为单页渲染创建完整 HTML（包含所有依赖）"""
+        body = self._extract_body_content(slide_html)
+        style = self._extract_style_content(slide_html)
+        
+        return f'''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <style>
+        html, body {{
+            margin: 0;
+            padding: 0;
+            width: {self.slide_width}px;
+            height: {self.slide_height}px;
+            overflow: hidden;
+        }}
+        * {{ box-sizing: border-box; }}
+        {style}
+    </style>
+</head>
+<body>
+    {body}
+</body>
+</html>'''
+    
+    def _create_screenshot_pdf_html(self, slide_images: List[str]) -> str:
+        """创建包含所有截图的 PDF HTML"""
+        pages = []
+        for i, img_base64 in enumerate(slide_images):
+            pages.append(f'''
+                <div class="page">
+                    <img src="data:image/png;base64,{img_base64}" />
+                </div>
+            ''')
+        
+        return f'''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        * {{ margin: 0; padding: 0; }}
+        .page {{
+            width: {self.slide_width}px;
+            height: {self.slide_height}px;
+            page-break-after: always;
+            overflow: hidden;
+        }}
+        .page:last-child {{
+            page-break-after: auto;
+        }}
+        .page img {{
+            width: 100%;
+            height: 100%;
+            display: block;
+        }}
+    </style>
+</head>
+<body>
+    {''.join(pages)}
+</body>
+</html>'''
 
     async def _prerender_slides(self, browser, slides_html: List[str]) -> List[str]:
         """
@@ -370,34 +491,110 @@ class PPTExporter:
         """
         将 HTML 幻灯片导出为单一 HTML 文件
         
-        Args:
-            slides_html: HTML 幻灯片列表
-            title: 文件标题
-            
-        Returns:
-            (文件路径, 文件名)
+        方案：使用 iframe 隔离每个幻灯片的样式，避免 CSS 冲突
         """
+        import html as html_module
+        
         try:
-            # 生成唯一文件名
             filename = f"{title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
             filepath = EXPORT_DIR / filename
             
-            # 使用 Playwright 预渲染幻灯片，确保图表转为静态且样式正确
-            logger.info("Pre-rendering slides for HTML export...")
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(
-                    headless=True,
-                    args=['--no-sandbox', '--disable-setuid-sandbox']
-                )
+            # 构建 iframe 版本的 HTML
+            slides_content = []
+            for i, slide_html in enumerate(slides_html):
+                # 确保幻灯片 HTML 包含必要的依赖
+                full_slide_html = self._ensure_slide_dependencies(slide_html)
+                # 转义 HTML 用于 srcdoc 属性
+                escaped_html = html_module.escape(full_slide_html)
                 
-                # 预渲染
-                processed_slides = await self._prerender_slides(browser, slides_html)
-                await browser.close()
+                slides_content.append(f'''
+                    <div class="slide-wrapper" id="slide-{i+1}">
+                        <iframe 
+                            srcdoc="{escaped_html}"
+                            class="slide-frame"
+                            frameborder="0"
+                            scrolling="no"
+                            sandbox="allow-scripts allow-same-origin"
+                        ></iframe>
+                        <div class="slide-number">{i+1} / {len(slides_html)}</div>
+                    </div>
+                ''')
             
-            # 使用预渲染后的内容构建完整的 HTML 文档
-            full_html = self._create_standalone_html(processed_slides, title)
+            full_html = f'''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{title} - 演示文稿</title>
+    <style>
+        * {{
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }}
+        body {{
+            font-family: 'Microsoft YaHei', sans-serif;
+            background-color: #1a1a2e;
+            padding: 40px 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 30px;
+        }}
+        .slide-wrapper {{
+            position: relative;
+            width: {self.slide_width}px;
+            height: {self.slide_height}px;
+            background: white;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            overflow: hidden;
+            flex-shrink: 0;
+        }}
+        .slide-frame {{
+            width: 100%;
+            height: 100%;
+            border: none;
+            display: block;
+        }}
+        .slide-number {{
+            position: absolute;
+            bottom: 10px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.6);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }}
+        .slide-wrapper:hover .slide-number {{
+            opacity: 1;
+        }}
+        @media print {{
+            body {{
+                background: none;
+                padding: 0;
+                gap: 0;
+            }}
+            .slide-wrapper {{
+                box-shadow: none;
+                border-radius: 0;
+                page-break-after: always;
+            }}
+            .slide-number {{
+                display: none;
+            }}
+        }}
+    </style>
+</head>
+<body>
+    {''.join(slides_content)}
+</body>
+</html>'''
             
-            # 写入文件
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(full_html)
             
@@ -407,6 +604,47 @@ class PPTExporter:
         except Exception as e:
             logger.error(f"Failed to export HTML: {e}")
             raise
+    
+    def _ensure_slide_dependencies(self, slide_html: str) -> str:
+        """确保幻灯片 HTML 包含必要的依赖（Tailwind, ECharts, 字体等）"""
+        # 检查是否已经有 head 标签
+        if '<head>' in slide_html.lower():
+            # 在 head 中注入依赖
+            deps = '''
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+'''
+            return slide_html.replace('</head>', deps + '</head>')
+        else:
+            # 包装成完整的 HTML
+            body = self._extract_body_content(slide_html)
+            style = self._extract_style_content(slide_html)
+            
+            return f'''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <style>
+        html, body {{
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }}
+        {style}
+    </style>
+</head>
+<body>
+    {body}
+</body>
+</html>'''
 
     def _create_standalone_html(self, slides_html: List[str], title: str) -> str:
         """创建独立的 HTML 浏览文件"""
