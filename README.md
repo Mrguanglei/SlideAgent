@@ -24,6 +24,8 @@
 - [x] **Content Editing** - Directly edit text content on preview page
 - [x] **Online Preview** - Real-time PPT preview in browser
 - [x] **Download Export** - Support export to PDF, HTML, PPTX formats，Note: The style will be lost.PPTX Processing in progress.
+
+## ✨ TODO
 - [ ] **Conversational Editing** - Continuously modify and optimize PPT content through dialogue
 - [ ] **Database Search Tool** - Call the knowledge base tool
 - [ ] **Multi-version Management** - Save historical versions, rollback and compare anytime
