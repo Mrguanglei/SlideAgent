@@ -67,7 +67,6 @@ from services.ppt_generator import (
     run_slide_design_agent
 )
 from services.resource_inliner import inline_all_resources
-from services.html_staticizer import staticize_html
 
 
 # ==================== 应用生命周期 ====================
@@ -703,14 +702,8 @@ async def stream_ppt_generation(
                     logger.error(f"[Stage 7] Failed to inline resources for slide {slide_count}: {e}")
                     # 内联失败不影响整体流程，继续使用原 HTML
                 
-                # 静态化 HTML（将动态内容转换为静态内容）
-                try:
-                    logger.info(f"[Stage 7] Staticizing HTML for slide {slide_count}...")
-                    html_content = await staticize_html(html_content, timeout=30)
-                    logger.info(f"[Stage 7] HTML staticized for slide {slide_count}")
-                except Exception as e:
-                    logger.error(f"[Stage 7] Failed to staticize HTML for slide {slide_count}: {e}")
-                    # 静态化失败不影响整体流程，继续使用原 HTML
+                # 注意：静态化已移除，只在导出时进行
+                # 生成时保留动态内容，以便前端预览
 
                 # 发送幻灯片工具调用事件
                 slide_tool_data = {

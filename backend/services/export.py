@@ -42,6 +42,9 @@ from services.pptx_generator import generate_pptx
 # HTML 验证
 from services.html_validator import validate_html
 
+# HTML 静态化
+from services.html_staticizer import batch_staticize_html
+
 # HTML 解析
 from bs4 import BeautifulSoup
 import re
@@ -213,15 +216,21 @@ class PPTExporter:
         导出 PDF - 直接拼接 HTML，不使用 iframe
         
         方案：
-        1. 解析每个幻灯片的 HTML，提取样式和内容
-        2. 直接拼接所有幻灯片的内容
-        3. 使用 Playwright 渲染并打印为 PDF
+        1. 静态化所有幻灯片（Canvas 转图片）
+        2. 解析每个幻灯片的 HTML，提取样式和内容
+        3. 直接拼接所有幻灯片的内容
+        4. 使用 Playwright 渲染并打印为 PDF
         """
         try:
             filename = f"{title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
             filepath = EXPORT_DIR / filename
             
-            # 直接合并所有幻灯片的 HTML
+            # 步骤 1：静态化所有幻灯片（将 Canvas 等动态内容转为静态）
+            logger.info(f"Staticizing {len(slides_html)} slides for PDF export...")
+            slides_html = await batch_staticize_html(slides_html, timeout=30)
+            logger.info("All slides staticized")
+            
+            # 步骤 2：合并所有幻灯片的 HTML
             pdf_html = self._merge_slides_html(slides_html)
             
             async with async_playwright() as p:
@@ -898,6 +907,11 @@ class PPTExporter:
             (文件路径, 文件名)
         """
         try:
+            # 静态化所有幻灯片
+            logger.info(f"Staticizing {len(slides_html)} slides for image export...")
+            slides_html = await batch_staticize_html(slides_html, timeout=30)
+            logger.info("All slides staticized")
+            
             # 生成唯一文件名
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             zip_filename = f"{title}_{timestamp}_images.zip"

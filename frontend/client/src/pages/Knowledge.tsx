@@ -39,6 +39,7 @@ import {
   Folder,
   Clock,
   FileUp,
+  Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -175,6 +176,7 @@ export default function Knowledge() {
   const [showNewFolderModal, setShowNewFolderModal] = useState(false);
   const [showRenameModal, setShowRenameModal] = useState(false);
   const [showMoveModal, setShowMoveModal] = useState(false);
+  const [showSearchDialog, setShowSearchDialog] = useState(false);
   const [renameTarget, setRenameTarget] = useState<{ type: "folder" | "document"; id: number; name: string } | null>(null);
   const [moveTarget, setMoveTarget] = useState<{ id: number; name: string } | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
@@ -189,6 +191,12 @@ export default function Knowledge() {
   const [textTitle, setTextTitle] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  
+  // 搜索状态
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollingTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -567,16 +575,32 @@ export default function Knowledge() {
         <div className="flex-shrink-0 px-6 py-4 bg-white border-b">
           <h1 className="text-xl font-bold mb-4">知识库</h1>
           
-          {/* 操作按钮 */}
-          <div className="flex items-center gap-2">
-            <Button onClick={() => setShowUploadModal(true)} size="sm" className="gap-1.5">
-              <Upload className="h-4 w-4" />
-              上传文件
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setShowNewFolderModal(true)} className="gap-1.5">
-              <Plus className="h-4 w-4" />
-              新建文件夹
-            </Button>
+          {/* 操作按钮和搜索框 */}
+          <div className="flex items-center gap-4 mb-4">
+            {/* 左侧按钮 */}
+            <div className="flex items-center gap-2">
+              <Button onClick={() => setShowUploadModal(true)} size="sm" className="gap-1.5">
+                <Upload className="h-4 w-4" />
+                上传文件
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setShowNewFolderModal(true)} className="gap-1.5">
+                <Plus className="h-4 w-4" />
+                新建文件夹
+              </Button>
+            </div>
+            
+            {/* 右侧搜索框 */}
+            <div 
+              className="relative flex-1 max-w-md cursor-text"
+              onClick={() => setShowSearchDialog(true)}
+            >
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="搜索知识库文档..."
+                className="pl-10 cursor-text"
+                readOnly
+              />
+            </div>
           </div>
           
           {/* 面包屑导航 */}
@@ -1043,6 +1067,104 @@ export default function Knowledge() {
               </Button>
             </div>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 搜索对话框 */}
+      <Dialog open={showSearchDialog} onOpenChange={setShowSearchDialog}>
+        <DialogContent className="max-w-2xl max-h-[600px] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>搜索知识库</DialogTitle>
+          </DialogHeader>
+          
+          {/* 搜索输入框 */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => {
+                const query = e.target.value;
+                setSearchQuery(query);
+                
+                // 清除之前的定时器
+                if (searchTimeoutRef.current) {
+                  clearTimeout(searchTimeoutRef.current);
+                }
+                
+                // 设置防抖
+                if (query.trim()) {
+                  setIsSearching(true);
+                  searchTimeoutRef.current = setTimeout(async () => {
+                    try {
+                      const res = await fetch(`${API_BASE}/api/knowledge/search`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ query: query.trim(), top_k: 10 }),
+                      });
+                      const data = await res.json();
+                      setSearchResults(data);
+                    } catch (error) {
+                      console.error("搜索失败:", error);
+                      toast.error("搜索失败，请检查网络连接");
+                    } finally {
+                      setIsSearching(false);
+                    }
+                  }, 300);
+                } else {
+                  setSearchResults([]);
+                  setIsSearching(false);
+                }
+              }}
+              placeholder="输入关键词搜索..."
+              className="pl-10"
+              autoFocus
+            />
+          </div>
+          
+          {/* 搜索结果 */}
+          <div className="flex-1 overflow-auto mt-4">
+            {isSearching ? (
+              <div className="flex items-center justify-center h-32">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : searchQuery.trim() === "" ? (
+              <div className="flex flex-col items-center justify-center h-32 text-center">
+                <Search className="h-12 w-12 text-muted-foreground/30 mb-2" />
+                <p className="text-sm text-muted-foreground">输入关键词开始搜索</p>
+              </div>
+            ) : searchResults.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-32 text-center">
+                <FileText className="h-12 w-12 text-muted-foreground/30 mb-2" />
+                <p className="text-sm text-muted-foreground">未找到相关结果</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {searchResults.map((result, index) => (
+                  <div
+                    key={index}
+                    className="p-4 rounded-lg border bg-white hover:border-primary/50 hover:shadow-sm transition-all cursor-pointer"
+                    onClick={() => {
+                      // TODO: 跳转到文档详情
+                      toast.info(`文档 ID: ${result.document_id}`);
+                    }}
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-primary" />
+                        <h3 className="font-medium text-sm">{result.document_name}</h3>
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {(result.similarity * 100).toFixed(1)}% 匹配
+                      </span>
+                    </div>
+                    <p className="text-sm text-muted-foreground line-clamp-3">
+                      {result.content}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

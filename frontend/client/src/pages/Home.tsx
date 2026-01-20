@@ -1337,7 +1337,7 @@ export default function Home() {
                 {isConfirming && (
                   <div className="mb-6">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm text-muted-foreground">正在...</span>
+                      <span className="text-sm text-muted-foreground">正在生成中...</span>
                       <LoadingDots />
                     </div>
                   </div>
