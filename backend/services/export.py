@@ -36,8 +36,8 @@ from weasyprint.text.fonts import FontConfiguration
 # 图片生成
 from playwright.async_api import async_playwright
 
-# PPTX 生成（新方案：HTML 解析 + python-pptx）
-from services.pptx_generator import generate_pptx
+# PPTX 生成（新方案：HTML 渲染 + 元素截图 + python-pptx）
+from services.html_to_pptx_converter import convert_html_to_pptx
 
 # HTML 验证
 from services.html_validator import validate_html
@@ -1024,8 +1024,8 @@ class PPTExporter:
             pptx_filename = f"{title}_{timestamp}.pptx"
             pptx_filepath = EXPORT_DIR / pptx_filename
             
-            # 使用新的 PPTX 生成器（HTML 解析 + python-pptx）
-            await generate_pptx(
+            # 使用新的 PPTX 生成器（HTML 渲染 + 元素截图 + python-pptx）
+            await convert_html_to_pptx(
                 slides_html=slides_html,
                 output_path=str(pptx_filepath),
                 title=title
