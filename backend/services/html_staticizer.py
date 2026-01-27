@@ -312,35 +312,50 @@ class HTMLStaticizer:
             });
         }""")
     
-    async def batch_staticize(self, html_list: list[str], timeout: int = 30) -> list[str]:
+    async def batch_staticize(self, html_list: list[str], timeout: int = 30, concurrency: int = 5) -> list[str]:
         """
-        批量静态化 HTML
+        批量静态化 HTML (并发处理)
         
         Args:
             html_list: HTML 列表
             timeout: 每个 HTML 的渲染超时时间（秒）
+            concurrency: 并发数量限制
             
         Returns:
             静态化后的 HTML 列表
         """
-        logger.info(f"Starting batch staticization for {len(html_list)} slides...")
+        logger.info(f"Starting batch staticization for {len(html_list)} slides with concurrency {concurrency}...")
         
-        results = []
+        # 结果列表（预分配以保持顺序）
+        results = [None] * len(html_list)
+        
+        # 信号量控制并发
+        sem = asyncio.Semaphore(concurrency)
         
         async with async_playwright() as p:
+            # 启动浏览器实例
+            # 注意：所有页面共享同一个浏览器实例
             browser = await p.chromium.launch(
                 headless=True,
                 args=['--no-sandbox', '--disable-setuid-sandbox']
             )
             
-            for i, html in enumerate(html_list):
-                try:
-                    logger.info(f"Staticizing slide {i+1}/{len(html_list)}...")
-                    static_html = await self._staticize_with_browser(browser, html, timeout)
-                    results.append(static_html)
-                except Exception as e:
-                    logger.error(f"Failed to staticize slide {i+1}: {e}")
-                    results.append(html)  # 失败时使用原始 HTML
+            async def process_slide(index: int, html: str):
+                """处理单个幻灯片"""
+                async with sem:
+                    try:
+                        logger.info(f"Staticizing slide {index+1}/{len(html_list)}...")
+                        static_html = await self._staticize_with_browser(browser, html, timeout)
+                        results[index] = static_html
+                    except Exception as e:
+                        logger.error(f"Failed to staticize slide {index+1}: {e}")
+                        results[index] = html  # 失败时使用原始 HTML
+
+            # 创建所有任务
+            tasks = [process_slide(i, html) for i, html in enumerate(html_list)]
+            
+            # 等待所有任务完成
+            await asyncio.gather(*tasks)
             
             await browser.close()
         

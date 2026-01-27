@@ -29,9 +29,7 @@ from typing import List, Optional, Tuple, Dict, Any
 from pathlib import Path
 from datetime import datetime
 
-# PDF 生成
-from weasyprint import HTML, CSS
-from weasyprint.text.fonts import FontConfiguration
+
 
 # 图片生成
 from playwright.async_api import async_playwright
@@ -58,6 +56,15 @@ EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 class PPTExporter:
     """PPT 导出器"""
+    
+    FONT_REPLACEMENTS = {
+        "MiSans": "Microsoft YaHei",
+        "Noto Sans SC": "Microsoft YaHei",
+        "Source Han Serif SC": "SimSun",
+        "Roboto Flex": "Arial",
+        "Source Code Pro": "Courier New",
+        "抖音黑体": "Microsoft YaHei",
+    }
     
     def __init__(self):
         self.slide_width = 1280
@@ -92,9 +99,8 @@ class PPTExporter:
         为 CSS 添加 scoping，避免样式冲突
         
         例如：
-        .title { color: blue; }
-        =>
-        .slide-1 .title { color: blue; }
+        .title { color: blue; }  =>  .slide-1 .title { color: blue; }
+        body { margin: 0; }      =>  .slide-1 { margin: 0; }
         """
         lines = []
         in_media_query = False
@@ -131,18 +137,30 @@ class PPTExporter:
             
             # 处理普通样式规则
             if '{' in stripped and not stripped.startswith('@') and not stripped.startswith('/*'):
-                selector = stripped[:stripped.index('{')].strip()
+                selector_part = stripped[:stripped.index('{')].strip()
                 rest = stripped[stripped.index('{'):]
                 
                 # 分割多个选择器（逗号分隔）
-                selectors = [s.strip() for s in selector.split(',')]
+                selectors = [s.strip() for s in selector_part.split(',')]
                 scoped_selectors = []
                 
                 for sel in selectors:
-                    if sel:
-                        # 为每个选择器添加 scoping
+                    if not sel:
+                        continue
+                        
+                    # 特殊处理 body 和 html 选择器
+                    # 1. 完全匹配 body 或 html -> 替换为 scope_class
+                    if sel.lower() in ('body', 'html'):
+                        scoped_sel = f".{scope_class}"
+                    # 2. body/html 开头的后代选择器 -> 替换开头
+                    elif sel.lower().startswith('body ') or sel.lower().startswith('html '):
+                        scoped_sel = f".{scope_class} " + sel[5:]
+                    # 3. 包含 body/html 的复合选择器 (如 div.body) -> 简单处理，直接前置 scope
+                    # 注意：这里简化处理，假设 slide CSS 比较规范
+                    else:
                         scoped_sel = f".{scope_class} {sel}"
-                        scoped_selectors.append(scoped_sel)
+                        
+                    scoped_selectors.append(scoped_sel)
                 
                 scoped_line = ', '.join(scoped_selectors) + ' ' + rest
                 lines.append(' ' * (len(line) - len(line.lstrip())) + scoped_line)
@@ -224,75 +242,59 @@ class PPTExporter:
         title: str = "presentation"
     ) -> Tuple[str, str]:
         """
-        导出 PDF - 截图方案（100% 保留样式）
-
+        导出 PDF - 直接拼接 HTML，不使用 iframe
+        
         方案：
-        1. 逐个渲染每个幻灯片并截图
-        2. 将所有截图拼成一个 PDF
-
-        这是最可靠的方案，因为是像素级截图，不会丢失任何样式。
+        1. 静态化所有幻灯片（Canvas 转图片）
+        2. 解析每个幻灯片的 HTML，提取样式和内容
+        3. 直接拼接所有幻灯片的内容
+        4. 使用 Playwright 渲染并打印为 PDF
         """
-        import base64
-
         try:
             filename = f"{title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
             filepath = EXPORT_DIR / filename
-
-            logger.info(f"Exporting {len(slides_html)} slides to PDF using screenshot method...")
-
-            # 收集所有幻灯片的截图（base64）
-            slide_images = []
-
+            
+            # 步骤 1：静态化所有幻灯片（将 Canvas 等动态内容转为静态）
+            logger.info(f"Staticizing {len(slides_html)} slides for PDF export...")
+            slides_html = await batch_staticize_html(slides_html, timeout=30)
+            logger.info("All slides staticized")
+            
+            # 步骤 2：合并所有幻灯片的 HTML
+            pdf_html = self._merge_slides_html(slides_html)
+            
             async with async_playwright() as p:
                 browser = await p.chromium.launch(
                     headless=True,
                     args=['--no-sandbox', '--disable-setuid-sandbox']
                 )
-
-                page = await browser.new_page(
-                    viewport={'width': self.slide_width, 'height': self.slide_height}
-                )
-
-                for i, slide_html in enumerate(slides_html):
-                    logger.info(f"Rendering slide {i+1}/{len(slides_html)}...")
-
-                    # 确保幻灯片有完整的依赖
-                    full_html = self._ensure_slide_dependencies(slide_html)
-
-                    # 加载幻灯片
-                    await page.set_content(full_html, wait_until="networkidle", timeout=60000)
-
-                    # 等待渲染完成
-                    await page.wait_for_timeout(1000)
-
-                    # 等待图片加载
-                    await page.evaluate("""() => {
-                        return Promise.all(
-                            Array.from(document.images)
-                                .filter(img => !img.complete)
-                                .map(img => new Promise(resolve => {
-                                    img.onload = img.onerror = resolve;
-                                }))
-                        );
-                    }""")
-
-                    # 等待字体加载
-                    await page.evaluate("""async () => {
-                        if (document.fonts) await document.fonts.ready;
-                    }""")
-
-                    # 截图
-                    screenshot = await page.screenshot(type='png', full_page=False)
-                    slide_images.append(base64.b64encode(screenshot).decode('utf-8'))
-
-                    logger.info(f"Slide {i+1} captured")
-
-                # 生成包含所有截图的 HTML，然后打印为 PDF
-                pdf_html = self._create_screenshot_pdf_html(slide_images)
-
-                await page.set_content(pdf_html, wait_until="load", timeout=60000)
-                await page.wait_for_timeout(500)
-
+                
+                page = await browser.new_page()
+                
+                # 加载 HTML
+                await page.set_content(pdf_html, wait_until="domcontentloaded", timeout=120000)
+                
+                # 等待页面渲染完成（增加等待时间确保 iframe 渲染）
+                await page.wait_for_timeout(3000)
+                
+                # 等待所有 iframe 加载完成
+                await page.evaluate("""() => {
+                    return Promise.all(
+                        Array.from(document.querySelectorAll('iframe')).map(iframe => {
+                            return new Promise((resolve) => {
+                                if (iframe.contentDocument && iframe.contentDocument.readyState === 'complete') {
+                                    resolve();
+                                } else {
+                                    iframe.addEventListener('load', resolve);
+                                    setTimeout(resolve, 2000); // 超时保护
+                                }
+                            });
+                        })
+                    );
+                }""")
+                
+                # 再等待一下确保渲染完成
+                await page.wait_for_timeout(2000)
+                
                 # 打印 PDF
                 await page.pdf(
                     path=str(filepath),
@@ -302,15 +304,16 @@ class PPTExporter:
                     display_header_footer=False,
                     margin={"top": "0", "right": "0", "bottom": "0", "left": "0"}
                 )
-
+                
                 await browser.close()
-
+            
             logger.info(f"PDF exported: {filepath}")
             return str(filepath), filename
-
+            
         except Exception as e:
             logger.error(f"Failed to export PDF: {e}")
             raise
+
     
     def _create_single_slide_html(self, slide_html: str) -> str:
         """为单页渲染创建完整 HTML（包含所有依赖）"""
@@ -581,16 +584,19 @@ class PPTExporter:
             html: HTML 内容
             scope_selector: CSS 作用域选择器 (例如 .slide-page)，如果提供，将把 body/html 选择器替换为此选择器
         """
-        import re
+        soup = BeautifulSoup(html, 'html.parser')
         styles = []
-        for match in re.finditer(r'<style[^>]*>(.*?)</style>', html, re.DOTALL | re.IGNORECASE):
-            css_text = match.group(1)
+        
+        for style_tag in soup.find_all('style'):
+            if not style_tag.string:
+                continue
+                
+            css_text = style_tag.string
             
-            # 过滤掉编辑器特定的重置样式 (使用正则匹配更灵活)
-            # 匹配包含 width: 1280px !important 的样式块（不管空格）
+            # 过滤掉编辑器特定的重置样式
             if '[contenteditable="true"]' in css_text:
                 continue
-            if re.search(r'width\s*:\s*1280px\s*!important', css_text):
+            if 'width: 1280px !important' in css_text.replace(' ', ''): # 简单去空匹配
                 continue
             
             if scope_selector:
@@ -601,7 +607,6 @@ class PPTExporter:
                 css_text = re.sub(r'(?<![\w-])body(?![\w-])', scope_selector, css_text, flags=re.IGNORECASE)
                 # 3. 处理单独的 html (通常移除或替换)
                 css_text = re.sub(r'(?<![\w-])html(?![\w-])', scope_selector, css_text, flags=re.IGNORECASE)
-                # 4. 强制 !important 以确保覆盖 (可选，暂时不加以避免副作用)
                 
             styles.append(css_text)
             
@@ -614,17 +619,7 @@ class PPTExporter:
     
     def _replace_fonts_for_pdf(self, css: str) -> str:
         """替换字体为 PDF 导出友好的字体"""
-        # 字体映射表
-        font_replacements = {
-            "MiSans": "Microsoft YaHei",
-            "Noto Sans SC": "Microsoft YaHei",
-            "Source Han Serif SC": "SimSun",
-            "Roboto Flex": "Arial",
-            "Source Code Pro": "Courier New",
-            "抖音黑体": "Microsoft YaHei",
-        }
-        
-        for web_font, pdf_font in font_replacements.items():
+        for web_font, pdf_font in self.FONT_REPLACEMENTS.items():
             css = css.replace(web_font, pdf_font)
         
         # 移除 @import 语句（WeasyPrint 可能无法加载）

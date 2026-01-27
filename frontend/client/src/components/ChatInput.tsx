@@ -1,4 +1,5 @@
-import { useState, useRef, useCallback, KeyboardEvent } from "react";
+import { useState, useRef, useCallback } from "react";
+import { useComposition } from "@/hooks/useComposition";
 import { usePPTAgent } from "@/contexts/PPTAgentContext";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -58,15 +59,14 @@ export function ChatInput({ onSend, disabled, className }: ChatInputProps) {
     setShowUpload(false);
   }, [message, state.attachments.length, convertType, template, numPages, onSend]);
 
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  const composition = useComposition<HTMLTextAreaElement>({
+    onKeyDown: (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         handleSend();
       }
     },
-    [handleSend]
-  );
+  });
 
   const isTemplateMode = convertType === ConvertType.PPTAGENT;
 
@@ -152,7 +152,9 @@ export function ChatInput({ onSend, disabled, className }: ChatInputProps) {
             ref={textareaRef}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            onKeyDown={handleKeyDown}
+            onKeyDown={composition.onKeyDown}
+            onCompositionStart={composition.onCompositionStart}
+            onCompositionEnd={composition.onCompositionEnd}
             placeholder="输入您的 PPT 需求，例如：帮我制作一份关于人工智能的演示文稿..."
             disabled={disabled}
             className={cn(
