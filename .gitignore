@@ -16,7 +16,8 @@ AGENTS.md
 backend/deeppresenter/deeppresenter/mcp.json
 backend/deeppresenter/deeppresenter/config.yaml
 # Copy from vuejs
-
+.history/
+.claude
 # Logs
 logs
 *.log
@@ -25,7 +26,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
-
+.dockerignore
 node_modules
 dist
 dist-ssr

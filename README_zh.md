@@ -62,6 +62,26 @@
    - **前端:** [http://localhost:3000](http://localhost:3000)
    - **后端 API:** [http://localhost:8000/docs](http://localhost:8000/docs)
 
+
+### 首次设置
+
+当您第一次打开应用程序时，友好的设置向导会引导您完成：
+
+1. **访问 Google AI Studio** - 一键链接到 [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+2. **创建免费 API Key** - 使用 Google 账户登录（无需信用卡）
+3. **粘贴并保存** - 复制您的 API Key 并粘贴到应用中
+
+> 🔒 **您的 API Key 安全存储在浏览器中**，永远不会上传到任何服务器。
+
+### 免费 API 配额
+
+Google Gemini API 提供慷慨的免费层级：
+- **每分钟 15 个请求**
+- **每天 1,500 个请求**
+- **无需信用卡**
+
+这对于日常使用来说绰绰有余！
+
 ## 📸 界面截图
 
 | 主页 | 对话生成 |

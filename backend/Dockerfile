@@ -21,21 +21,20 @@ RUN set -eux; \
     fi
 
 # 系统依赖（带缓存）
+# 移除了导出相关的依赖，这些已迁移到 export_tool 服务：
+# - chromium (PDF/PNG 导出)
+# - libreoffice (不再需要)
+# - libcairo2, libpango (WeasyPrint 依赖)
+# - poppler-utils (PDF 处理)
 RUN --mount=type=cache,target=/var/cache/apt \
     --mount=type=cache,target=/var/lib/apt \
     apt-get update && apt-get install -y --no-install-recommends \
     build-essential git curl wget ca-certificates gnupg lsb-release \
     python3-dev libxml2-dev libxslt1-dev zlib1g-dev libffi-dev libssl-dev \
-    libreoffice libreoffice-impress \
-    chromium \
     libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1 \
-    poppler-utils \
-    libcairo2-dev libpango1.0-dev libgdk-pixbuf2.0-dev shared-mime-info \
-    fonts-liberation fonts-noto-cjk fonts-wqy-zenhei \
     && rm -rf /var/lib/apt/lists/*
 
 # pip/uv（带缓存）
-# 注意：已移除 Node.js 相关依赖，PPTX 生成现在使用纯 Python 方案
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --upgrade pip setuptools wheel \
     && pip install uv -i https://pypi.tuna.tsinghua.edu.cn/simple
@@ -55,23 +54,11 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 RUN --mount=type=cache,target=/root/.cache/pip \
     cd deeppresenter && pip install -e . -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-# 安装 python-pptx（PPTX 生成）和 requests（图片下载）
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install python-pptx requests -i https://pypi.tuna.tsinghua.edu.cn/simple
-
-# 安装 Playwright 浏览器
-RUN playwright install chromium && \
-    playwright install-deps chromium
-
 COPY . .
 
-# 注意：已移除 html2pptx npm 依赖安装步骤
-# PPTX 生成现在使用纯 Python 方案（html_parser.py + pptx_generator.py）
 
 ENV HF_HOME=/root/.cache/huggingface \
-    HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface/hub \
-    CHROME_BIN=/usr/bin/chromium \
-    CHROMIUM_PATH=/usr/bin/chromium
+    HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface/hub
 
 RUN mkdir -p /tmp/ppt_workspace
 EXPOSE 8000

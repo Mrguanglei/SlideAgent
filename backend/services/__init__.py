@@ -28,7 +28,7 @@ from .ppt_generator import (
     generate_slide_thinking,
     run_slide_design_agent
 )
-from .export import export_ppt
+from .export_client import export_client
 from .share import create_share, get_share, delete_share, get_conversation_shares
 
 __all__ = [
@@ -54,8 +54,8 @@ __all__ = [
     "parse_num_pages",
     "generate_slide_thinking",
     "run_slide_design_agent",
-    # Export
-    "export_ppt",
+    # Export Client
+    "export_client",
     # Share
     "create_share",
     "get_share",

@@ -51,28 +51,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
-    environment:
-      - PORT=8000
-      - PYTHONUNBUFFERED=1
-      # 数据库连接配置
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-pptagent}:${POSTGRES_PASSWORD:-pptagent_secret_2024}@db:5432/${POSTGRES_DB:-pptagent_dev}
-      # PPTAgent LLM Configuration
-      - PPTAGENT_MODEL=${PPTAGENT_MODEL}
-      - PPTAGENT_API_KEY=${PPTAGENT_API_KEY}
-      - PPTAGENT_API_BASE=${PPTAGENT_API_BASE}
-      # Knowledge Base LLM Configuration
-      - KNOWLEDGE_LLM_BASE_URL=${KNOWLEDGE_LLM_BASE_URL}
-      - KNOWLEDGE_LLM_API_KEY=${KNOWLEDGE_LLM_API_KEY}
-      - KNOWLEDGE_LLM_MODEL=${KNOWLEDGE_LLM_MODEL}
-      - KNOWLEDGE_EMBEDDING_MODEL=${KNOWLEDGE_EMBEDDING_MODEL}
-      # MinerU API Key
-      - MINERU_API_KEY=${MINERU_API_KEY}
-      # Tavily API Keys
-      - TAVILY_API_KEY=${TAVILY_API_KEY}
-      - TAVILY_BACKUP=${TAVILY_BACKUP}
-      # HuggingFace 配置 - 解决模型下载问题
-      - HF_ENDPOINT=https://hf-mirror.com
-      - HF_HUB_OFFLINE=0
+    env_file:
+      - .env
     depends_on:
       db:
         condition: service_healthy
@@ -84,9 +64,36 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     privileged: true
 
+  # 导出工具服务（统一的 PDF/PNG/HTML/PPTX 导出）
+  export_tool:
+    build:
+      context: ./export_tool
+      dockerfile: Dockerfile
+    container_name: pptagent_export_tool
+    ports:
+      - "8017:8017"
+    env_file:
+      - .env
+    environment:
+      - PORT=8017
+      - PYTHONUNBUFFERED=1
+      - EXPORT_DIR=/tmp/exports
+    networks:
+      - pptagent-network
+    volumes:
+      - export-workspace:/tmp/exports
+      - ppt-workspace:/tmp/ppt_workspace
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8017/api/export_tool/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
 volumes:
   ppt-workspace:
   postgres_data:
+  export-workspace:
 
 networks:
   pptagent-network:

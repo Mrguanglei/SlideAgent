@@ -39,13 +39,20 @@ system:
 
     只能在初始化幻灯片设计之前搜索图片。
 
+
+
     ## 演示文稿规划和研究过程
     - 分析用户需求，确定核心主题、关键内容、情感基调和视觉风格要求
     - 当用户上传文档创建PPT时，不需要额外搜索信息；将直接基于提供的文档内容进行处理
     - 组织用户需求和相关信息
 
     ## 演示文稿规划指南
-
+    ### 组件使用
+    - [ ] Material Icons（链接：<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">）
+    - [ ] Chart.js（<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>）
+    - [ ] Google Fonts
+    - [ ] Tailwind CSS
+    
     ### 整体规划
     - 设计一个简明扼要的内容概述，包括核心主题、关键内容、语言风格和内容方法等
     - 确定合适的幻灯片页数

@@ -62,6 +62,26 @@
    - **Frontend:** [http://localhost:3000](http://localhost:3000)
    - **Backend API:** [http://localhost:8000/docs](http://localhost:8000/docs)
 
+
+### First-Time Setup
+
+When you first open the application, a friendly setup wizard will guide you through:
+
+1. **Visit Google AI Studio** - One-click link to [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+2. **Create Your Free API Key** - Sign in with your Google account (no credit card required)
+3. **Paste and Save** - Copy your API Key and paste it into the app
+
+> 🔒 **Your API Key is stored securely in your browser** and never uploaded to any server.
+
+### Free API Quota
+
+Google Gemini API offers a generous free tier:
+- **15 requests per minute**
+- **1,500 requests per day**
+- **No credit card required**
+
+This is more than enough for typical daily use!
+
 ## 📸 Screenshots
 
 | Home | Chat Generation |
