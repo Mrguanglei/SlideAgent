@@ -1,35 +1,36 @@
-# 👋 Hi～ SlideAgent - 让PPT生成更加简单
+# SlideAgent — 让 PPT 生成更简单
 
 [![English](https://img.shields.io/badge/README-English-blue.svg)](README.md) | [中文](README_zh.md)
 
-**SlideAgent** 是一款开源的 AI 驱动的演示文稿生成工具。只需输入您的想法，即可自动生成精美的 PPT，支持多种导出格式和在线分享。
+**SlideAgent** 是一款开源的 AI 驱动演示文稿生成工具。输入主题或上传文档即可生成大纲、内容与设计，并支持在线预览与多种格式导出。
 
-##### 创作不易，多多Star ✨ ✨ ✨ ✨ ✨
+##### 创作不易，欢迎点个 Star ✨
 
-![PPTAgent主页](images/home.png)
+![PPTAgent 主页](images/home.png)
 
-#### ⚠️注意：本项目是基于[PPTAgent (CAS)](https://github.com/icip-cas/PPTAgent)此开源项目二次开发,代码部分依旧保持 PPTAgent命名
 
-## ✨ 主要功能
 
-| 功能 | 状态 | 描述 |
-| :--- | :--- | :--- |
-| **AI 生成 PPT** | ✅ | 基于大语言模型，自动生成大纲、内容和设计 |
-| **在线分享** | ✅ | 生成分享链接，支持设置有效期 |
-| **全局搜索** | ✅ | 快速搜索对话历史和 PPT 项目 |
-| **知识库** | ✅ | 上传文档，基于知识库内容生成 PPT |
-| **任务队列** | ✅ | 批量上传文档，后端自动排队处理 |
+## ✨ 亮点
 
-## ✨ 已完成
+- **AI 生成 PPT** — 自动生成大纲、内容与设计
+- **知识库** — 上传文档并基于知识库生成 PPT
+- **在线预览与编辑** — 浏览器内预览并直接编辑文本
+- **在线分享** — 生成分享链接，支持设置有效期
+- **任务队列** — 批量任务后台排队处理
+- **PPTX 导出服务** — 独立的 export_tool 服务将 HTML 幻灯片转换为可编辑 PPTX
 
-- [x] **内容编辑** - 直接在预览页面编辑文本内容
-- [x] **在线预览** - 在浏览器中实时预览 PPT 效果
-- [x] **下载导出** - 支持导出为 PDF、HTML、PPTX 格式. Note:PPTX样式会丢失，正在处理
-- [x] **状态管理** - Agent任务状态全局持久化设计
-## ✨ TODO
-- [ ] **对话式编辑** - 通过对话持续修改和优化 PPT 内容
-- [ ] **数据库搜索工具** - 调用知识库工具
-- [ ] **多版本管理** - 保存历史版本，随时回滚和比较
+## ✅ 已完成
+
+- [x] **内容编辑** — 预览页面直接编辑文本
+- [x] **在线预览** — 浏览器内实时预览
+- [x] **导出** — 支持 PDF / HTML / PPTX（PPTX 样式可能丢失，持续优化中）
+- [x] **状态管理** — Agent 任务状态全局持久化
+
+## 🧭 规划中
+
+- [ ] **对话式编辑** — 通过对话持续修改与优化内容
+- [ ] **数据库搜索工具** — 直接调用知识库工具
+- [ ] **多版本管理** — 版本保存、对比与回滚
 
 ## 🚀 快速开始
 
@@ -51,7 +52,7 @@
    ```bash
    cp .env.example .env
    ```
-   您可以在 `.env` 文件中配置数据库、LLM API Key 等。
+   可在 `.env` 中配置数据库与 LLM API 等参数。
 
 3. **构建并启动服务**
    ```bash
@@ -62,62 +63,12 @@
    - **前端:** [http://localhost:3000](http://localhost:3000)
    - **后端 API:** [http://localhost:8000/docs](http://localhost:8000/docs)
 
+## 🧩 PPTX 导出服务（HTML -> PPTX）
 
-### 首次设置
-
-当您第一次打开应用程序时，友好的设置向导会引导您完成：
-
-1. **访问 Google AI Studio** - 一键链接到 [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
-2. **创建免费 API Key** - 使用 Google 账户登录（无需信用卡）
-3. **粘贴并保存** - 复制您的 API Key 并粘贴到应用中
-
-> 🔒 **您的 API Key 安全存储在浏览器中**，永远不会上传到任何服务器。
-
-### 免费 API 配额
-
-Google Gemini API 提供慷慨的免费层级：
-- **每分钟 15 个请求**
-- **每天 1,500 个请求**
-- **无需信用卡**
-
-这对于日常使用来说绰绰有余！
-
-## 📸 界面截图
-
-| 主页 | 对话生成 |
-| :--- | :--- |
-| ![主页](images/home.png) | ![对话生成](images/chat.png) |
-| **知识库** | **全局搜索** |
-| ![知识库](images/knowledge.png) | ![全局搜索](images/search.png) |
-| **在线编辑** | **多种下载** |
-| ![在线编辑](images/editor.png) | ![多种下载](images/download.png) |
-
-
-## 🛠️ 项目结构
-
-```
-.env.example         # 环境变量示例
-docker-compose.yml   # Docker 编排配置
-README.md            # 项目说明
-
-backend/             # Python 后端 (FastAPI)
-├── services/        # 核心服务（导出、分享、知识库）
-├── routers/         # API 路由
-├── database/        # 数据库模型和 CRUD
-├── api_server.py    # FastAPI 服务器入口
-├── requirements.txt # Python 依赖
-└── Dockerfile
-
-frontend/            # React 前端 (Vite)
-├── src/
-│   ├── pages/       # 页面组件 (Home, Knowledge, ShareView)
-│   ├── components/  # 可复用组件 (Sidebar, Modals, etc.)
-│   ├── lib/         # API 请求、工具函数
-│   └── types/       # TypeScript 类型定义
-├── package.json     # Node.js 依赖
-├── vite.config.ts   # Vite 配置
-└── Dockerfile
-```
+- **服务**：`export_tool`（FastAPI）独立运行，由 Docker Compose 启动
+- **链路**：后端 `/api/ppt/export` -> export_tool `/api/export_tool/pptx`
+- **技术**：Playwright（Chromium）渲染 HTML，dom-to-pptx 转换为 PPTX，并支持字体嵌入与图标资产
+- **更多**：详见 `export_tool/README.md` 的 API 与部署说明
 
 ## ⚙️ 环境变量
 
@@ -138,21 +89,62 @@ frontend/            # React 前端 (Vite)
 | `KNOWLEDGE_EMBEDDING_MODEL` | `embedding-3` | 知识库向量化模型 |
 | `KNOWLEDGE_UPLOAD_DIR` | `/tmp/knowledge_uploads` | 知识库文件上传目录 |
 
+## 📸 界面截图
+
+| 主页 | 对话生成 |
+| :--- | :--- |
+| ![主页](images/home.png) | ![对话生成](images/chat.png) |
+| **知识库** | **全局搜索** |
+| ![知识库](images/knowledge.png) | ![全局搜索](images/search.png) |
+| **在线编辑** | **多种下载** |
+| ![在线编辑](images/editor.png) | ![多种下载](images/download.png) |
+
+## 🛠️ 项目结构
+
+```
+.env.example         # 环境变量示例
+docker-compose.yml   # Docker 编排配置
+README.md            # 项目说明
+
+backend/             # Python 后端 (FastAPI)
+├── services/        # 核心服务（导出、分享、知识库）
+├── routers/         # API 路由
+├── database/        # 数据库模型与 CRUD
+├── api_server.py    # FastAPI 服务器入口
+├── requirements.txt # Python 依赖
+└── Dockerfile
+
+frontend/            # React 前端 (Vite)
+├── src/
+│   ├── pages/       # 页面组件 (Home, Knowledge, ShareView)
+│   ├── components/  # 可复用组件 (Sidebar, Modals, etc.)
+│   ├── lib/         # API 请求与工具函数
+│   └── types/       # TypeScript 类型定义
+├── package.json     # Node.js 依赖
+├── vite.config.ts   # Vite 配置
+└── Dockerfile
+
+export_tool/         # 导出服务 (PDF/PNG/HTML/PPTX)
+├── app/             # FastAPI 应用与服务
+├── dom-to-pptx/     # HTML -> PPTX 核心库
+├── fonts/           # 字体资源（嵌入）
+└── Dockerfile
+```
+
 ## 🤝 贡献
 
-欢迎各种形式的贡献！如果您有任何想法或建议，请随时提交 Pull Request 或创建 Issue。
-
+欢迎各种形式的贡献！如果您有任何想法或建议，欢迎提交 Pull Request 或 Issue。
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Mrguanglei/SlideAgent&type=Date)](https://star-history.com/#Mrguanglei/SlideAgent&Date)
 
-
 ## 🙏 致谢
 
-- [PPTAgent (CAS)](https://github.com/icip-cas/PPTAgent) - 本项目基于此开源项目二次开发，感谢原作者的贡献。
+- [PPTAgent (CAS)](https://github.com/icip-cas/PPTAgent) - 本项目基于此开源项目二次开发，感谢原作者贡献。
 - [shadcn/ui](https://ui.shadcn.com/) - 前端 UI 组件库。
 - [FastAPI](https://fastapi.tiangolo.com/) - 高性能的 Python Web 框架。
 - [React](https://react.dev/) - 用于构建用户界面的 JavaScript 库。
+- [dom-to-pptx](https://github.com/atharva9167j/dom-to-pptx/tree/master/src) - 用于导出的 pptx 静态库
 
 ## 📄 许可证
 
-本项目遵循 **[AGPL-3.0 协议](https://www.gnu.org/licenses/agpl-3.0.html)**。仅供学习和交流使用，禁止用于任何商业目的。
+本项目遵循 **[AGPL-3.0 协议](https://www.gnu.org/licenses/agpl-3.0.html)**。仅供学习和交流使用，禁止用于任何商业用途。
