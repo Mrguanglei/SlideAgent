@@ -131,12 +131,14 @@ async def export_ppt_file(
             )
         else:
             # 调用 export_tool 服务进行导出
+            # 前端使用 "images" 表示图片导出，export_tool 端点为 "png"
+            export_format = "png" if request.format == "images" else request.format
             logger.info(f"Calling export_tool service for {request.format} export")
-            
+
             try:
                 file_data, filename = await export_client.export(
                     slides_html=slides_html,
-                    format=request.format,
+                    format=export_format,
                     title=safe_title
                 )
             except Exception as e:
