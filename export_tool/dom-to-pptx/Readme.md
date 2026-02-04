@@ -303,7 +303,8 @@ listConfig: {
 
 ## License
 
-MIT © [Atharva Dharmendra Jagtap](https://github.com/atharva9167j) and `dom-to-pptx` contributors.
+This project follows the **[AGPL-3.0 License](https://www.gnu.org/licenses/agpl-3.0.html)**. For learning and communication purposes only, commercial use is prohibited.
+
 
 ## Acknowledgements
 

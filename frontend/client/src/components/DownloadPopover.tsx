@@ -156,7 +156,7 @@ export default function DownloadPopover({ projectId, versionId, title, disabled 
                         iconBgInfo="bg-orange-100"
                         onDownload={() => handleExport("pptx", ".pptx")}
                         isLoading={loadingMap["pptx"]}
-                        extraInfo="PPTX 下载目前有问题，敬请谅解"
+                        extraInfo="PPT导出不支持部分视觉效果，样式可能有差异；"
                     />
                 </div>
             </PopoverContent>
