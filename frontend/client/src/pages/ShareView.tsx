@@ -352,27 +352,32 @@ export default function ShareView() {
         {/* 中间聊天区域 */}
         <div className="flex-1 flex flex-col">
           {/* 消息列表 */}
-          <ScrollArea className="flex-1">
-            <div className="max-w-4xl mx-auto px-6 py-6">
+          <ScrollArea className="flex-1 chat-surface">
+            <div className="max-w-4xl mx-auto px-6 py-8">
               {messages.map((message, index) => {
                 // 判断是否是第一条 AI 消息
                 const isFirstAiMessage =
                   message.role === "assistant" &&
                   (index === 0 || messages[index - 1]?.role !== "assistant");
+                const isFirstUserMessage =
+                  message.role === "user" &&
+                  (index === 0 || messages[index - 1]?.role !== "user");
 
                 return (
                   <MessageItem
                     key={message.id}
                     message={message}
-                    onOpenPanel={handleOpenPanel}
-                    onConfirmInfo={noopFunction}
-                    currentTopic={shareData.conversation.title}
+                      onOpenPanel={handleOpenPanel}
+                      onConfirmInfo={noopFunction}
+                      currentTopic={shareData.conversation.title}
                     autoConfirmCountdown={null}
                     onCancelAutoConfirm={noopFunction}
                     isFirstAiMessage={isFirstAiMessage}
+                    isFirstUserMessage={isFirstUserMessage}
                     onSetSearchRound={setCurrentSearchRound}
                     onScrollToSlide={noopFunction}
                     isShareMode={true}
+                    showThinking={true}
                   />
                 );
               })}

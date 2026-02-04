@@ -17,6 +17,38 @@ class PptxOptions(BaseModel):
     autoEmbedFonts: Optional[bool] = Field(default=True, description="Automatically detect and embed fonts")
     fonts: Optional[List[FontConfig]] = Field(default=None, description="Manual font configurations")
     listConfig: Optional[Dict[str, Any]] = Field(default=None, description="List styling configuration")
+    iconMode: Optional[str] = Field(
+        default=None,
+        description="Icon render mode: 'image' or 'text'"
+    )
+    iconBaseUrl: Optional[str] = Field(
+        default=None,
+        description="Base URL for icon images (used with iconPathTemplate)"
+    )
+    iconExt: Optional[str] = Field(
+        default=None,
+        description="Icon file extension (used with iconBaseUrl)"
+    )
+    iconPathTemplate: Optional[str] = Field(
+        default=None,
+        description="Icon URL template, supports {base} {name} {ext}"
+    )
+    textBoxExpandPx: Optional[float] = Field(
+        default=None,
+        description="Extra width in px added to text boxes to avoid last-character wrapping"
+    )
+    textBoxExpandMode: Optional[str] = Field(
+        default=None,
+        description="Text box expand mode: 'auto' or 'fixed'"
+    )
+    textBoxExpandCjkFactor: Optional[float] = Field(
+        default=None,
+        description="Auto-expand factor for CJK text (multiplier of font size in px)"
+    )
+    textBoxExpandLatinFactor: Optional[float] = Field(
+        default=None,
+        description="Auto-expand factor for Latin text (multiplier of font size in px)"
+    )
 
 
 class ExportOptions(BaseModel):

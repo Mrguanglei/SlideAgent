@@ -196,9 +196,6 @@ export_tool/
 │   ├── src/
 │   ├── dist/
 │   └── package.json
-├── static/
-│   ├── converter.html       # HTML 转换器模板
-│   └── dom-to-pptx.bundle.js # 构建产物
 ├── requirements.txt         # Python 依赖
 ├── .env.example            # 环境变量模板
 ├── .dockerignore           # Docker 忽略文件
@@ -219,6 +216,10 @@ export_tool/
 | `CONVERSION_TIMEOUT` | 30 | 转换超时时间(秒) |
 | `BROWSER_POOL_SIZE` | 3 | 浏览器池大小 |
 | `ALLOWED_ORIGINS` | * | CORS 允许的源 |
+| `DOM_TO_PPTX_BUNDLE_PATH` | 空 | 可选：直接指定 dom-to-pptx.bundle.js 的本地路径（优先级高于默认路径） |
+| `DOM_TO_PPTX_BUNDLE_URL` | 空 | 可选：直接指定 dom-to-pptx.bundle.js 的完整 URL（用于远程加载） |
+
+说明：`export_tool` 会直接加载 `export_tool/dom-to-pptx/dist/dom-to-pptx.bundle.js`。若本地未构建，请在 `export_tool/dom-to-pptx` 下执行 `npm install && npm run build`，或用上述环境变量覆盖路径/URL。
 
 ## Docker 部署
 

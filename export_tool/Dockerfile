@@ -1,3 +1,17 @@
+# Build dom-to-pptx bundle only (avoid copying demo/icons into runtime image)
+FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/node:20-alpine AS dom_to_pptx_build
+WORKDIR /app/dom-to-pptx
+
+# Install deps (use registry mirror if needed)
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+COPY dom-to-pptx/package.json dom-to-pptx/pnpm-lock.yaml dom-to-pptx/rollup.config.js ./
+COPY dom-to-pptx/src ./src
+RUN npm config set registry ${NPM_REGISTRY} \
+  && npm i -g pnpm@10.28.0 \
+  && pnpm config set registry ${NPM_REGISTRY} \
+  && pnpm install --include=dev \
+  && pnpm build
+
 FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.11-slim
 
 # 设置环境变量
@@ -41,6 +55,9 @@ WORKDIR /app
 
 # 复制应用代码
 COPY app ./app
+
+# 复制构建后的 dom-to-pptx bundle（仅 dist，避免 demo/icons 体积）
+COPY --from=dom_to_pptx_build /app/dom-to-pptx/dist ./dom-to-pptx/dist
 
 # COPY static ./static
 

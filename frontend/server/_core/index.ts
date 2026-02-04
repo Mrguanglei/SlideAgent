@@ -38,7 +38,7 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
-  
+
   // 代理到 Python 后端的 /api/chat 接口 (SSE)
   app.post("/api/ppt/chat", async (req, res) => {
     try {
@@ -97,7 +97,7 @@ async function startServer() {
       res.status(500).json({ error: "Failed to connect to backend" });
     }
   });
-  
+
   // 代理到 Python 后端的 /api/confirm 接口 (SSE)
   app.post("/api/ppt/confirm", async (req, res) => {
     try {
@@ -109,17 +109,17 @@ async function startServer() {
         },
         body: JSON.stringify(req.body),
       });
-      
+
       // 设置 SSE 响应头
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
-      
+
       // 流式转发响应
       if (response.body) {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-        
+
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -133,7 +133,7 @@ async function startServer() {
       res.status(500).json({ error: "Failed to connect to backend" });
     }
   });
-  
+
   // 代理到 Python 后端的 /api/health 接口
   app.get("/api/ppt/health", async (req, res) => {
     try {
@@ -145,7 +145,7 @@ async function startServer() {
       res.status(500).json({ error: "Backend not available" });
     }
   });
-  
+
   // tRPC API
   app.use(
     "/api/trpc",
@@ -161,12 +161,35 @@ async function startServer() {
       const url = `${BACKEND_URL}/api${req.url}`;
       console.log(`[Proxy] Forwarding ${req.method} /api${req.url} to ${url}`);
 
+      const reqContentType = req.headers["content-type"];
+      let body: any;
+      let headers: HeadersInit = {};
+
+      if (reqContentType && reqContentType.includes("multipart/form-data")) {
+        // 对于上传文件，直接透传流和 Content-Type
+        body = req;
+        headers = {
+          // 注意：不要手动设置 multipart/form-data 的 Content-Type，
+          // 因为 fetch/browser/client 会设置 boundary。
+          // 但是这里的 request 是来自 express 的 incoming request
+          // 如果我们直接 pipe req 到 fetch body， fetch 应该能读取流。
+          // 我们需要把 client 发来的 Content-Type (含 boundary) 转发给 backend
+          "Content-Type": reqContentType,
+        };
+      } else {
+        // 默认处理 JSON
+        headers = {
+          "Content-Type": reqContentType || "application/json",
+        };
+        body = req.method !== "GET" && req.method !== "HEAD" ? JSON.stringify(req.body) : undefined;
+      }
+
       const response = await fetch(url, {
         method: req.method,
-        headers: {
-          "Content-Type": req.headers["content-type"] || "application/json",
-        },
-        body: req.method !== "GET" && req.method !== "HEAD" ? JSON.stringify(req.body) : undefined,
+        headers: headers,
+        body: body,
+        // @ts-ignore - node-fetch supports stream as body
+        duplex: 'half'
       });
 
       // 转发响应头
@@ -176,7 +199,7 @@ async function startServer() {
 
       // 检查响应类型，对于二进制文件使用 arrayBuffer
       const contentType = response.headers.get("content-type") || "";
-      const isBinaryResponse = 
+      const isBinaryResponse =
         contentType.includes("application/octet-stream") ||
         contentType.includes("application/pdf") ||
         contentType.includes("application/zip") ||

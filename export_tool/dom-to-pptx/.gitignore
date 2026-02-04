@@ -1,0 +1,12 @@
+node_modules
+.DS_Store
+.git
+test-playground
+.env
+.vscode
+dist
+ins.md
+.dockerignore
+code_context.txt
+.npmignore
+.prettierrc

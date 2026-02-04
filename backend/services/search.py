@@ -86,6 +86,10 @@ async def generate_search_queries(topic: str, supplement_data: dict) -> List[str
             {"role": "user", "content": prompt}
         ])
 
+        # 移除可能的 <think> 标签内容（防止深度思考模式影响搜索关键词）
+        import re
+        response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
+
         # 解析关键词列表
         queries = []
         for line in response.strip().split("\n"):
@@ -93,7 +97,8 @@ async def generate_search_queries(topic: str, supplement_data: dict) -> List[str
             # 移除可能的编号前缀
             if line and not line.startswith("#"):
                 line = line.lstrip("0123456789.-、）) ").strip()
-                if line and len(line) < 50:
+                # 额外过滤：确保不包含 think 标签
+                if line and len(line) < 50 and '<think>' not in line.lower() and '</think>' not in line.lower():
                     queries.append(line)
 
         # 去重

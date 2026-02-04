@@ -154,14 +154,31 @@ export default function SearchDialog({ open, onOpenChange }: SearchDialogProps) 
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [open, onOpenChange]);
   
+  const resolveConversationUuid = async (conversationId: number): Promise<string | null> => {
+    try {
+      const response = await fetch(`${API_BASE}/api/conversations/${conversationId}`);
+      if (!response.ok) return null;
+      const data = await response.json();
+      return data?.conversation?.uuid || data?.uuid || null;
+    } catch (error) {
+      console.error("获取对话 UUID 失败:", error);
+      return null;
+    }
+  };
+
   // 点击结果
-  const handleResultClick = (result: SearchResult) => {
+  const handleResultClick = async (result: SearchResult) => {
     onOpenChange(false);
-    
-    if (result.type === "conversation") {
-      setLocation(`/?conversation=${result.id}`);
-    } else if (result.type === "ppt" && result.conversation_id) {
-      setLocation(`/?conversation=${result.conversation_id}`);
+
+    const targetId =
+      result.type === "conversation" ? result.id : result.conversation_id;
+    if (!targetId) return;
+
+    const uuid = await resolveConversationUuid(targetId);
+    if (uuid) {
+      setLocation(`/chat/${uuid}`);
+    } else {
+      console.warn("未找到对话 UUID，无法跳转");
     }
   };
   

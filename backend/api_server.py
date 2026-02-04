@@ -44,7 +44,10 @@ from database.connection import init_db, get_db
 from database import crud
 
 # 导入路由
-from routers import conversations_router, ppt_router, export_router, knowledge_router
+from routers import conversations_router, ppt_router, export_router, knowledge_router, files_router
+
+# 导入文档解析服务
+from services.knowledge.document_parser import DocumentParser
 
 # 导入服务
 from services.llm import call_llm_api, call_llm_api_stream
@@ -123,6 +126,7 @@ app.include_router(conversations_router)
 app.include_router(ppt_router)
 app.include_router(export_router)
 app.include_router(knowledge_router)
+app.include_router(files_router)
 
 
 # ==================== Pydantic Models ====================
@@ -133,11 +137,12 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     conversation_id: Optional[int] = None  # 新增：关联对话 ID
     supplement_data: Optional[Dict[str, Any]] = None
-    attachments: Optional[List[str]] = None
+    attachments: Optional[List[Dict[str, Any]]] = None
     num_pages: Optional[str] = None
     template: Optional[str] = None
     powerpoint_type: Optional[str] = "16:9 Widescreen"
     convert_type: Optional[str] = "slide_design"
+    deep_thinking_mode: Optional[bool] = False  # 新增：深度思考模式
 
 
 class ConfirmRequest(BaseModel):
@@ -156,17 +161,32 @@ async def stream_ppt_generation(
     conversation_uuid: Optional[str] = None,
     is_new_conversation: bool = False,
     supplement_data: Optional[Dict[str, Any]] = None,
-    attachments: Optional[List[str]] = None,
+    attachments: Optional[List[Dict[str, Any]]] = None,
     num_pages: Optional[str] = None,
     template: Optional[str] = None,
     powerpoint_type: str = "16:9 Widescreen",
     convert_type: str = "slide_design",
     db: Optional[AsyncSession] = None,
     save_user_message: bool = True,
+    search_results: list = None, 
+    deep_thinking_content: str = None, 
+    outline_content: str = None
 ):
     """流式生成 PPT 的核心函数"""
     logger.info(f"[stream_ppt_generation] START - session={session_id}, conversation={conversation_id}")
     logger.info(f"[stream_ppt_generation] instruction={instruction}, supplement_data={supplement_data}")
+
+    # 定义检查暂停的内部函数
+    async def check_pause():
+        if not db or not session_id:
+            return False
+        
+        # 重新获取 session 状态
+        current_session = await crud.get_session(db, session_id)
+        if current_session and current_session.task_status == "paused":
+            logger.info(f"[stream_ppt_generation] Task paused by user: {session_id}")
+            return True
+        return False
 
     # 如果是新创建的对话，发送 conversation_created 事件
     if is_new_conversation and conversation_uuid:
@@ -220,13 +240,16 @@ async def stream_ppt_generation(
     # 如果提供了 supplement_data，更新会话（即使是空字典也要更新）
     if supplement_data is not None:
         logger.info(f"[stream_ppt_generation] Updating session with supplement_data: {supplement_data}")
-        session["supplement_data"] = supplement_data
+        # CRITICAL FIX: Merge with existing supplement_data to preserve file_context and skip_search
+        if session["supplement_data"] is None:
+            session["supplement_data"] = {}
+        session["supplement_data"].update(supplement_data)  # Merge instead of replace!
         session["stage"] = "confirmed"
         if db:
             await crud.update_session(
                 db, session_id, 
                 stage="confirmed", 
-                supplement_data=supplement_data
+                supplement_data=session["supplement_data"]  # Save merged data
             )
             await db.commit()
         logger.info(f"[stream_ppt_generation] Session stage updated to 'confirmed'")
@@ -235,12 +258,81 @@ async def stream_ppt_generation(
     if db and conversation_id and save_user_message:
         try:
             logger.info(f"[stream_ppt_generation] Saving user message to database")
-            await crud.create_message(db, conversation_id, "user", instruction)
+            user_msg = await crud.create_message(db, conversation_id, "user", instruction)
+            
+            # 保存附件
+            if attachments:
+                for attachment in attachments:
+                    try:
+                        await crud.create_message_attachment(
+                            db, 
+                            user_msg.id, 
+                            filename=attachment.get("filename", "unknown"),
+                            file_path=attachment.get("file_path", ""),
+                            file_size=attachment.get("size", 0),
+                            content_type=attachment.get("content_type")
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to save attachment {attachment}: {e}")
+
             await db.commit()
         except Exception as e:
             logger.error(f"Failed to save user message: {e}")
     elif not save_user_message:
         logger.info(f"[stream_ppt_generation] Skipping user message save (already saved)")
+    
+    # ==================== 处理附件内容 (File Context) ====================
+    file_context = ""
+    if attachments:
+        logger.info(f"[stream_ppt_generation] Processing attachments: {len(attachments)}")
+        extracted_texts = []
+        for att in attachments:
+            file_path = att.get("file_path")
+            knowledge_id = att.get("knowledge_document_id")
+
+            # 如果是知识库文档，从数据库获取文件路径
+            if knowledge_id and not file_path and db:
+                try:
+                    k_doc = await crud.get_knowledge_document(db, int(knowledge_id))
+                    if k_doc:
+                        file_path = k_doc.file_path
+                        # 更新 filename 以匹配知识库文档名（可选）
+                        if not att.get("filename"):
+                            att["filename"] = k_doc.filename
+                except Exception as e:
+                    logger.error(f"Failed to get knowledge document {knowledge_id}: {e}")
+
+            if file_path and os.path.exists(file_path):
+                try:
+                    # 使用 DocumentParser 解析文件
+                    text, meta = await DocumentParser.parse(file_path)
+                    extracted_texts.append(f"--- 文件: {att.get('filename', 'unknown')} ---\n{text}\n")
+                    logger.info(f"Parsed attachment {att.get('filename')}: {meta}")
+                except Exception as e:
+                    logger.error(f"Failed to parse attachment {file_path}: {e}")
+            else:
+                logger.warning(f"Attachment file not found: {file_path}")
+        
+        if extracted_texts:
+            file_context = "\n".join(extracted_texts)
+            
+            # 确保 supplement_data 初始化
+            if "supplement_data" not in session or session["supplement_data"] is None:
+                session["supplement_data"] = {}
+                
+            # 将文件内容存入 supplement_data
+            if "file_context" not in session["supplement_data"]:
+                session["supplement_data"]["file_context"] = file_context
+                # 标记需要跳过搜索
+                session["supplement_data"]["skip_search"] = True
+                
+                # 再次更新数据库，确保 file_context 和 skip_search 被保存
+                if db:
+                    await crud.update_session(
+                        db, session_id, 
+                        supplement_data=session["supplement_data"]
+                    )
+                    await db.commit()
     
     # ==================== 阶段 1: 检查 PPT 意图 ====================
     
@@ -400,21 +492,39 @@ async def stream_ppt_generation(
             except Exception as e:
                 logger.error(f"Failed to save task plan: {e}")
         
-        session["stage"] = "searching"
+        # 检查是否跳过搜索（基于文件上下文）
+        if session["supplement_data"].get("skip_search"):
+            logger.info("Skipping search phase due to file context")
+            session["stage"] = "outline"  # Fixed: was "ppt_outline", should be "outline"
+            # 也可以选择跳过深度思考，或者保留它来分析文件内容
+            # 用户说"直接按照文档写PPT"，暗示跳过搜索
+            # 我们直接进入大纲生成阶段，但需要确保大纲生成器能利用 file_context
+        else:
+            session["stage"] = "searching"
+            
         # 更新数据库中的 session 状态
         if db:
-            await crud.update_session(db, session_id, stage="searching")
+            await crud.update_session(db, session_id, stage=session["stage"])
             await db.commit()
     
     # ==================== 阶段 4: 搜索 ====================
     
     if session["stage"] == "searching":
+        # 检查暂停
+        if await check_pause():
+            return
+
         # 生成搜索关键词
         search_queries = await generate_search_queries(instruction, session["supplement_data"])
         logger.info(f"Generated search queries: {search_queries}")
         all_search_results = []
 
         for round_num, query in enumerate(search_queries, 1):
+            # Check pause before each search round
+            if await check_pause():
+                logger.info("Paused during search phase")
+                return
+                
             logger.info(f"Search round {round_num}: query = '{query}'")
             # 发送搜索开始事件
             search_start_data = {
@@ -521,6 +631,10 @@ async def stream_ppt_generation(
     # ==================== 阶段 5: 深度思考 ====================
 
     if session["stage"] == "deep_thinking":
+        # 检查暂停
+        if await check_pause():
+            return
+
         # 发送深度思考开始标记
         start_data = {
             'type': 'deep_thinking_start',
@@ -530,6 +644,10 @@ async def stream_ppt_generation(
 
         deep_thinking_content = ""
         async for chunk in stream_deep_thinking(instruction, session["search_results"]):
+            # Check pause during streaming
+            if await check_pause():
+                logger.info("Paused during deep thinking stream")
+                return
             deep_thinking_content += chunk
             # 使用 deep_thinking_stream 类型，前端会正确处理
             message_data = {
@@ -593,6 +711,10 @@ async def stream_ppt_generation(
     # ==================== 阶段 6: 生成大纲 ====================
     
     if session["stage"] == "outline":
+        # 检查暂停
+        if await check_pause():
+            return
+            
         outline_content = ""
         async for chunk in stream_outline_generation(
             instruction,
@@ -654,6 +776,10 @@ async def stream_ppt_generation(
     # ==================== 阶段 7: 生成 PPT ====================
 
     if session["stage"] == "generating":
+        # 检查暂停
+        if await check_pause():
+            return
+
         logger.info(f"[Stage 7 Start] Starting PPT generation")
         actual_num_pages = parse_num_pages(session["supplement_data"])
         logger.info(f"[Stage 7] Parsed num_pages: {actual_num_pages}")

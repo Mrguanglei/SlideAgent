@@ -21,43 +21,57 @@ async def check_ppt_intent(instruction: str) -> bool:
         keywords = ["ppt", "幻灯片", "演示", "slide", "presentation", "制作", "生成", "帮我做", "做一个", "介绍", "讲解", "分析"]
         return any(kw in instruction.lower() for kw in keywords)
 
+    # 0. 快速预判断：如果是纯问候语，直接返回 False，不需要问 LLM
+    greetings = ["你好", "您好", "hi", "hello", "嗨", "在吗", "早安", "晚安", "早上好", "晚上好"]
+    cleaned_instruction = instruction.lower().strip().replace("！", "").replace("!", "")
+    if cleaned_instruction in greetings:
+        logger.info(f"Intent check: '{instruction}' identified as greeting, skipping LLM.")
+        return False
+
     try:
-        prompt = f"""你是一个 PPT 制作助手的意图识别模块。判断用户输入是否需要制作 PPT。
+        # 1. 强制 system prompt 简单粗暴，防止废话
+        prompt = f"""你是一个 PPT 制作助手的意图识别模块。判断用户输入是否需要**立即生成 PPT**。
 
 用户输入：{instruction}
 
-**重要上下文**：
-- 用户正在使用专门的 PPT 制作助手
-- 用户说"介绍XX"、"讲解XX"、"分析XX"等，都应该理解为需要制作演示材料（PPT）
-- 只有明显的问候、闲聊才不是 PPT 需求
+**核心规则**：
+- 必须包含**具体主题**（如"包含AI"、"关于华为"）才算PPT需求。
+- 询问功能、问候、闲聊、或者"你会做什么"统统不算。
 
-**是 PPT 需求** 的情况（判断为"是"）：
-- 明确提到：PPT、幻灯片、演示文稿、presentation
-- 要求介绍/讲解/分析某个主题、产品、公司、技术等
-- 要求制作、生成、创建演示内容
-- 描述性需求，如"帮我详细介绍XX"、"讲一下XX"
-
-**不是 PPT 需求** 的情况（判断为"否"）：
-- 纯问候：你好、hi、hello、嗨
-- 纯闲聊：怎么样、在吗、最近如何
-- 单纯的疑问句且没有制作意图：你能做什么？你是什么？
-
-只回答"是"或"否",不要有其他内容。"""
+请只回答一个字："是" 或 "否"。"""
 
         response = await call_llm_api([
-            {"role": "system", "content": "你是一个意图识别助手。记住：用户在使用PPT制作助手，所以'介绍XX'、'讲解XX'都应该理解为需要制作PPT。只需要回答'是'或'否'。"},
+            {"role": "system", "content": "只回答'是'或'否'。不要输出任何思考过程！不要输出标点符号！"},
             {"role": "user", "content": prompt}
         ])
 
-        result = response.strip().lower()
-        is_ppt_request = "是" in result or "yes" in result
-        logger.info(f"Intent check for '{instruction[:30]}...': {is_ppt_request} (response: {result})")
+        # 2. 清理响应内容（移除 <think> 标签和多余空格）
+        import re
+        clean_result = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
+        # 移除可能的 markdown 标记
+        clean_result = clean_result.replace("**", "").replace("`", "").replace('"', "").replace("'", "")
+        
+        # 3. 严格判断
+        # 只有当结果明确是 "是" 或 "yes" 时才返回 True
+        # 避免 "是否"、"是不是" 等词其中的 "是" 导致误判
+        is_ppt_request = clean_result == "是" or clean_result.lower() == "yes"
+        
+        logger.info(f"Intent check raw: {repr(response)}")
+        logger.info(f"Intent check clean: {repr(clean_result)} -> {is_ppt_request}")
+        
         return is_ppt_request
 
     except Exception as e:
         logger.error(f"Intent check failed: {e}, falling back to keyword matching")
+        # 降级策略：关键词匹配，但要排除询问词
         keywords = ["ppt", "幻灯片", "演示", "slide", "presentation", "制作", "生成", "帮我做", "做一个", "介绍", "讲解", "分析"]
-        return any(kw in instruction.lower() for kw in keywords)
+        negative_keywords = ["什么", "怎么", "如何", "功能", "能力", "会"]
+        
+        has_keyword = any(kw in instruction.lower() for kw in keywords)
+        has_negative = any(nkw in instruction.lower() for nkw in negative_keywords)
+        
+        # 如果有关键词，且没有明显的疑问词，才认为是PPT需求
+        return has_keyword and not has_negative
 
 
 async def analyze_user_intent_for_paused_session(
@@ -198,7 +212,49 @@ async def stream_task_plan_with_llm(topic: str, supplement_data: dict) -> AsyncG
     style = supplement_data.get("style", "简约现代")
     keywords = supplement_data.get("keywords", "")
 
-    prompt = f"""用户询问"{topic}"，请分析这个请求并生成详细的任务执行规划。
+    file_context = supplement_data.get("file_context", "")
+
+    # 根据是否有文件内容生成不同的提示
+    if file_context:
+        prompt = f"""用户提供了上传的文件内容，要求基于文件制作关于"{topic}"的PPT。请分析文件内容并生成详细的任务执行规划。
+
+文件内容上下文：
+{file_context[:3000]}... (已截断)
+
+目标受众：{audience}
+内容模块：{', '.join(modules) if modules else '根据文件内容规划'}
+设计风格：{style}
+重点内容：{keywords if keywords else '无特别要求'}
+
+请按以下格式分析（使用纯文本，不要使用JSON）：
+
+用户要求基于文件制作"{topic}"的PPT，我需要分析文件并规划：
+
+1. 核心内容识别：
+• [分析文件的主题]
+• [提取文件中的关键信息]
+• [确定PPT的核心逻辑]
+
+2. 信息提取维度：
+• 按照文件结构提取章节
+• 整理关键数据和结论
+• 提炼核心观点
+• 梳理案例或证明材料
+
+3. 执行策略：
+• **直接使用提供的文件内容作为主要来源**
+• 无需进行外部搜索（除非文件内容严重缺失）
+• 重点是对文件内容进行结构化整理和可视化呈现
+
+4. 结构规划：
+• 基于文件目录或逻辑生成PPT大纲
+• 确保覆盖文件中的所有关键点
+
+现在开始执行规划。
+
+请根据文件内容和主题"{topic}"，生成针对性的分析内容，保持上述格式。"""
+    else:
+        prompt = f"""用户询问"{topic}"，请分析这个请求并生成详细的任务执行规划。
 
 目标受众：{audience}
 内容模块：{', '.join(modules) if modules else '待定'}
@@ -316,6 +372,24 @@ async def stream_outline_generation(topic: str, search_results: list, deep_think
     else:
         num_pages = num_pages_range
 
+    file_context = supplement_data.get("file_context", "")
+    
+    # 构造上下文内容
+    context_str = ""
+    if file_context:
+        context_str = f"""
+文件内容（主要依据）：
+{file_context[:5000]}
+"""
+    else:
+        context_str = f"""
+搜索结果摘要：
+{results_summary}
+
+深度分析内容：
+{deep_thinking_content[:1500] if deep_thinking_content else '无'}
+"""
+
     prompt = f"""基于以下信息，为「{topic}」生成PPT大纲目录。
 
 目标受众：{audience}
@@ -323,11 +397,7 @@ async def stream_outline_generation(topic: str, search_results: list, deep_think
 设计风格：{style}
 **必须生成的页数：{num_pages}页（严格遵守，不能多也不能少）**
 
-搜索结果摘要：
-{results_summary}
-
-深度分析内容：
-{deep_thinking_content[:1500] if deep_thinking_content else '无'}
+{context_str}
 
 请生成一份**内容充实、结构合理**的PPT大纲，格式如下：
 

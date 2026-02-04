@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HTML 转 PPTX</title>
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <h1>HTML 转 PPTX</h1>
+      <p class="muted">上传 HTML，点击转换，即可下载可编辑 PPTX。</p>
+
+      <div class="row">
+        <label class="file">
+          <input id="htmlFile" type="file" accept=".html,.htm,text/html" />
+          <span>选择 HTML 文件</span>
+        </label>
+        <button id="convert" class="action" disabled>转换并下载</button>
+      </div>
+
+      <div id="status" class="status">等待上传文件…</div>
+
+      <div class="preview">
+        <div class="preview-title">预览</div>
+        <div id="previewHost" class="preview-host">
+          <div class="empty">未加载预览</div>
+        </div>
+      </div>
+    </main>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

@@ -19,6 +19,8 @@ const API_BASE = "/api";
 
 export interface ConversationDetail {
   conversation: Conversation;
+  session_id?: string;
+  task_status?: string;
   messages?: Message[];
   ppt_project?: PPTProject;
   task_plans?: TaskPlan[];
@@ -103,7 +105,68 @@ export async function deleteConversation(conversationId: number): Promise<void> 
   }
 }
 
-// ==================== PPT 相关 API ====================
+// ==================== 文件上传相关 API ====================
+
+export interface UploadResponse {
+  id: string;
+  filename: string;
+  file_path: string;
+  content_type: string;
+  size: number;
+  knowledge_document_id?: number;
+}
+
+/**
+ * 上传文件
+ */
+export async function uploadFile(file: File): Promise<UploadResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch(`${API_BASE}/files/upload`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to upload file");
+  }
+
+  return response.json();
+}
+
+export interface DocumentResponse {
+  id: number;
+  filename: string;
+  display_name: string;
+  file_type: string;
+  file_size: number;
+  parse_status: string;
+  created_at: string;
+}
+
+/**
+ * 获取知识库文档列表
+ */
+export async function getKnowledgeDocuments(
+  folderId?: number
+): Promise<DocumentResponse[]> {
+  const url = folderId
+    ? `${API_BASE}/knowledge/documents?folder_id=${folderId}`
+    : `${API_BASE}/knowledge/documents`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      console.error("Failed to fetch knowledge documents", response.statusText);
+      return [];
+    }
+    return response.json();
+  } catch (error) {
+    console.error("Error fetching knowledge documents:", error);
+    return [];
+  }
+}
 
 /**
  * 获取 PPT 项目列表（文件面板用）

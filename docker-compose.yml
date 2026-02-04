@@ -83,6 +83,8 @@ services:
     volumes:
       - export-workspace:/tmp/exports
       - ppt-workspace:/tmp/ppt_workspace
+      - ./export_tool/dom-to-pptx/material-design-icons/symbols/web:/usr/share/nginx/html/material-design-icons/symbols/web:ro
+      - ./export_tool/fonts:/app/fonts:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8017/api/export_tool/health || exit 1"]

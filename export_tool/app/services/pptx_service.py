@@ -7,20 +7,46 @@ import asyncio
 import base64
 import json
 import logging
+import os
+from typing import Tuple
 from pathlib import Path
-from typing import Optional, Tuple
 import tempfile
 
-from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
-from app.models.schemas import HtmlToPptxRequest, PptxOptions
+from app.models.schemas import HtmlToPptxRequest
 from app.utils.browser import get_browser_pool
 from app.utils.exceptions import PptxGenerationError
+from app.utils.icon_assets import get_material_symbols_base_url
+from app.utils.font_assets import resolve_font_configs
 
 logger = logging.getLogger(__name__)
 
-# Path to the converter HTML template
-CONVERTER_HTML_PATH = Path(__file__).parent.parent.parent / "static" / "converter.html"
+def _get_dom_to_pptx_bundle_location() -> str:
+    env_url = os.getenv("DOM_TO_PPTX_BUNDLE_URL")
+    if env_url:
+        return env_url
+
+    env_path = os.getenv("DOM_TO_PPTX_BUNDLE_PATH")
+    if env_path:
+        return env_path
+
+    default_path = Path(__file__).resolve().parents[2] / "dom-to-pptx" / "dist" / "dom-to-pptx.bundle.js"
+    return str(default_path)
+
+
+def _build_converter_html() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>dom-to-pptx runtime</title>
+  </head>
+  <body>
+    <div id="slide-container"></div>
+  </body>
+</html>"""
 
 
 async def generate_pptx_from_html(
@@ -51,10 +77,26 @@ async def generate_pptx_from_html(
         page.on("pageerror", lambda err: console_logs.append(f"[ERROR] {err}"))
         
         try:
-            # Load the converter page
-            logger.info("Loading converter page...")
-            converter_url = f"file://{CONVERTER_HTML_PATH.absolute()}"
-            await page.goto(converter_url, wait_until="networkidle", timeout=30000)
+            # Load converter shell
+            bundle_location = _get_dom_to_pptx_bundle_location()
+            logger.info(f"Loading dom-to-pptx bundle: {bundle_location}")
+            await page.set_content(
+                _build_converter_html(),
+                wait_until="load",
+                timeout=30000
+            )
+
+            if bundle_location.startswith("http://") or bundle_location.startswith("https://") or bundle_location.startswith("file://"):
+                await page.add_script_tag(url=bundle_location)
+            else:
+                bundle_path = Path(bundle_location).expanduser().resolve()
+                if not bundle_path.exists():
+                    raise PptxGenerationError(
+                        f"dom-to-pptx bundle not found: {bundle_path}. "
+                        "Run `pnpm install && pnpm build` in export_tool/dom-to-pptx "
+                        "or set DOM_TO_PPTX_BUNDLE_URL."
+                    )
+                await page.add_script_tag(path=str(bundle_path))
             
             # Wait for dom-to-pptx to be available
             logger.info("Waiting for dom-to-pptx library...")
@@ -78,89 +120,20 @@ async def generate_pptx_from_html(
             if not dom_info.get('hasExport'):
                 raise PptxGenerationError("dom-to-pptx.exportToPptx function not found")
             
-            # Inject HTML content into the page with iframe extraction support
-            logger.info("Injecting HTML content and extracting iframe slides...")
+            # Inject HTML content into the page
+            logger.info("Injecting HTML content...")
             await page.evaluate("""
-                async (html) => {
+                (html) => {
                     const container = document.getElementById('slide-container');
                     if (!container) {
                         throw new Error('slide-container element not found');
                     }
-                    
-                    // First, inject the raw HTML
                     container.innerHTML = html;
-                    
-                    // Check if there are iframes with srcdoc (common in slide exports)
-                    const iframes = container.querySelectorAll('iframe[srcdoc]');
-                    
-                    if (iframes.length > 0) {
-                        console.log(`🔍 Found ${iframes.length} iframes with srcdoc, extracting slide content...`);
-                        
-                        // Store extracted slides
-                        const extractedSlides = [];
-                        
-                        // Process each iframe
-                        for (let i = 0; i < iframes.length; i++) {
-                            const iframe = iframes[i];
-                            const srcdoc = iframe.getAttribute('srcdoc');
-                            
-                            if (!srcdoc) {
-                                console.warn(`⚠️ Iframe ${i} has no srcdoc attribute`);
-                                continue;
-                            }
-                            
-                            // Create a temporary container to parse the HTML
-                            const tempDiv = document.createElement('div');
-                            tempDiv.innerHTML = srcdoc;
-                            
-                            // Find the body content
-                            const bodyMatch = srcdoc.match(/<body[^>]*>([\s\S]*)<\/body>/i);
-                            const styleMatches = srcdoc.match(/<style[^>]*>([\s\S]*?)<\/style>/gi);
-                            
-                            if (bodyMatch) {
-                                // Create a slide wrapper
-                                const slideDiv = document.createElement('div');
-                                slideDiv.className = 'ppt-slide';
-                                slideDiv.style.cssText = 'width: 1280px; height: 720px; position: relative; overflow: hidden;';
-                                
-                                // Inject styles first
-                                if (styleMatches) {
-                                    styleMatches.forEach(styleTag => {
-                                        slideDiv.innerHTML += styleTag;
-                                    });
-                                }
-                                
-                                // Inject body content
-                                slideDiv.innerHTML += bodyMatch[1];
-                                
-                                extractedSlides.push(slideDiv);
-                                console.log(`✅ Extracted slide ${i + 1}/${iframes.length}`);
-                            } else {
-                                console.warn(`⚠️ Could not extract body from iframe ${i}`);
-                            }
-                        }
-                        
-                        // Replace container content with extracted slides
-                        if (extractedSlides.length > 0) {
-                            container.innerHTML = '';
-                            extractedSlides.forEach(slide => container.appendChild(slide));
-                            console.log(`✅ Successfully extracted ${extractedSlides.length} slides from iframes`);
-                        } else {
-                            console.error('❌ Failed to extract any slides from iframes');
-                        }
-                    } else {
-                        console.log('ℹ️ No iframes found, using HTML as-is');
-                        
-                        // If no iframes, ensure slides have .ppt-slide class
-                        const potentialSlides = container.querySelectorAll('.slide-wrapper, [class*="slide"]');
-                        if (potentialSlides.length > 0) {
-                            potentialSlides.forEach(slide => {
-                                if (!slide.classList.contains('ppt-slide')) {
-                                    slide.classList.add('ppt-slide');
-                                }
-                            });
-                            console.log(`✅ Added .ppt-slide class to ${potentialSlides.length} elements`);
-                        }
+                    const slides = container.querySelectorAll('.ppt-slide');
+                    if (!slides.length) {
+                        Array.from(container.children).forEach((node) => {
+                            if (node && node.classList) node.classList.add('ppt-slide');
+                        });
                     }
                 }
             """, request.html)
@@ -310,19 +283,111 @@ async def generate_pptx_from_html(
             await asyncio.sleep(1)  # Additional wait for rendering
             
             # Build options object for dom-to-pptx
+            auto_embed = request.options.autoEmbedFonts if request.options else False
             options = {
                 "skipDownload": True,
-                "autoEmbedFonts": request.options.autoEmbedFonts if request.options else False
+                "autoEmbedFonts": auto_embed,
             }
-            
+
             if request.options and request.options.fonts:
-                options["fonts"] = [
-                    {"name": f.name, "url": f.url} 
-                    for f in request.options.fonts
-                ]
-            
+                options["fonts"] = [{"name": f.name, "url": f.url} for f in request.options.fonts]
+            else:
+                auto_fonts = resolve_font_configs(request.html, request.css or "")
+                if auto_fonts:
+                    options["fonts"] = auto_fonts
+
             if request.options and request.options.listConfig:
                 options["listConfig"] = request.options.listConfig
+
+            if request.options and request.options.iconMode:
+                options["iconMode"] = request.options.iconMode
+            if request.options and request.options.iconBaseUrl:
+                options["iconBaseUrl"] = request.options.iconBaseUrl
+            if request.options and request.options.iconExt:
+                options["iconExt"] = request.options.iconExt
+            if request.options and request.options.iconPathTemplate:
+                options["iconPathTemplate"] = request.options.iconPathTemplate
+            if request.options and request.options.textBoxExpandPx is not None:
+                options["textBoxExpandPx"] = request.options.textBoxExpandPx
+            if request.options and request.options.textBoxExpandMode:
+                options["textBoxExpandMode"] = request.options.textBoxExpandMode
+            if request.options and request.options.textBoxExpandCjkFactor is not None:
+                options["textBoxExpandCjkFactor"] = request.options.textBoxExpandCjkFactor
+            if request.options and request.options.textBoxExpandLatinFactor is not None:
+                options["textBoxExpandLatinFactor"] = request.options.textBoxExpandLatinFactor
+
+            # If explicit fonts provided, merge any auto-resolved ones not already set.
+            if request.options and request.options.fonts:
+                auto_fonts = resolve_font_configs(request.html, request.css or "")
+                if auto_fonts:
+                    existing = {f["name"] for f in options.get("fonts", [])}
+                    for font in auto_fonts:
+                        if font["name"] not in existing:
+                            options.setdefault("fonts", []).append(font)
+
+            # Inject @font-face rules to align browser layout with embedded fonts
+            if options.get("fonts"):
+                def _font_format(url: str) -> str:
+                    lower = url.lower().split("?")[0].split("#")[0]
+                    if lower.endswith(".otf"):
+                        return "opentype"
+                    if lower.endswith(".woff"):
+                        return "woff"
+                    return "truetype"
+
+                def _font_weight(url: str) -> str:
+                    lower = url.lower()
+                    if "variable" in lower or "vf" in lower:
+                        return "100 900"
+                    return "400"
+
+                font_faces = []
+                for font in options["fonts"]:
+                    name = font.get("name")
+                    url = font.get("url")
+                    if not name or not url:
+                        continue
+                    fmt = _font_format(url)
+                    weight = _font_weight(url)
+                    font_faces.append(
+                        "@font-face { "
+                        f"font-family: '{name}'; "
+                        f"src: url('{url}') format('{fmt}'); "
+                        f"font-weight: {weight}; "
+                        "font-style: normal; "
+                        "font-display: swap; "
+                        "}"
+                    )
+
+                if font_faces:
+                    await page.evaluate(
+                        """
+                        (css) => {
+                            const style = document.createElement('style');
+                            style.textContent = css;
+                            document.head.appendChild(style);
+                        }
+                        """,
+                        "\n".join(font_faces),
+                    )
+
+            # Default Material Icons/Symbols handling (SVG fallback)
+            if "iconBaseUrl" not in options:
+                haystack = f"{request.html}\n{request.css}".lower()
+                if "material-icons" in haystack or "material-symbols" in haystack:
+                    base_url = get_material_symbols_base_url()
+                    if base_url:
+                        options.setdefault("iconMode", "image")
+                        options.setdefault("iconBaseUrl", base_url)
+                        options.setdefault(
+                            "iconPathTemplate",
+                            "{base}/{name}/materialsymbolsoutlined/{name}_24px.svg",
+                        )
+
+            if "textBoxExpandMode" not in options:
+                options["textBoxExpandMode"] = "auto"
+            if "textBoxExpandPx" not in options:
+                options["textBoxExpandPx"] = 1
             
             logger.info("Starting PPTX generation...")
             
@@ -361,45 +426,42 @@ async def generate_pptx_from_html(
                 page.set_default_timeout(timeout * 1000)
                 
                 pptx_blob = await page.evaluate(
-                    """
-                    async ({ autoEmbed }) => {
-                        const container = document.getElementById('slide-container');
-                        if (!container) throw new Error('Container not found');
-                        
-                        const slides = container.querySelectorAll('.ppt-slide');
-                        if (slides.length === 0) {
-                            console.error('❌ No .ppt-slide elements found for conversion');
-                            throw new Error('No slides found for conversion');
+                        """
+                        async ({ exportOptions }) => {
+                            const container = document.getElementById('slide-container');
+                            if (!container) throw new Error('Container not found');
+                            
+                            const slides = container.querySelectorAll('.ppt-slide');
+                            if (slides.length === 0) {
+                                console.error('❌ No .ppt-slide elements found for conversion');
+                                throw new Error('No slides found for conversion');
+                            }
+                            
+                            console.log(`🚀 Converting ${slides.length} slides to PPTX...`);
+                            
+                            const slideArray = Array.from(slides);
+                            console.log('Slide details:', slideArray.map((s, i) => ({
+                                index: i,
+                                width: s.offsetWidth,
+                                height: s.offsetHeight,
+                                hasContent: s.innerHTML.length > 100
+                            })));
+                            
+                            const blob = await domToPptx.exportToPptx(slideArray, exportOptions);
+                            
+                            console.log('✅ PPTX blob generated, size:', blob.size);
+                            
+                            // Convert blob to base64
+                            return new Promise((resolve, reject) => {
+                                const reader = new FileReader();
+                                reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                                reader.onerror = reject;
+                                reader.readAsDataURL(blob);
+                            });
                         }
-                        
-                        console.log(`🚀 Converting ${slides.length} slides to PPTX...`);
-                        
-                        const slideArray = Array.from(slides);
-                        console.log('Slide details:', slideArray.map((s, i) => ({
-                            index: i,
-                            width: s.offsetWidth,
-                            height: s.offsetHeight,
-                            hasContent: s.innerHTML.length > 100
-                        })));
-                        
-                        const blob = await domToPptx.exportToPptx(slideArray, {
-                            skipDownload: true,
-                            autoEmbedFonts: autoEmbed
-                        });
-                        
-                        console.log('✅ PPTX blob generated, size:', blob.size);
-                        
-                        // Convert blob to base64
-                        return new Promise((resolve, reject) => {
-                            const reader = new FileReader();
-                            reader.onloadend = () => resolve(reader.result.split(',')[1]);
-                            reader.onerror = reject;
-                            reader.readAsDataURL(blob);
-                        });
-                    }
-                    """,
-                    {"autoEmbed": options["autoEmbedFonts"]}
-                )
+                        """,
+                        {"exportOptions": options}
+                    )
             except PlaywrightTimeoutError:
                 logger.error(f"PPTX generation timed out after {timeout} seconds")
                 logger.error(f"Recent console logs: {console_logs[-10:]}")

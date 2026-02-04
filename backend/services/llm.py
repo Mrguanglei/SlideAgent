@@ -16,7 +16,7 @@ from utils.config import Config
 logger = logging.getLogger(__name__)
 
 
-async def call_llm_api(messages: list, response_format: dict = None) -> str:
+async def call_llm_api(messages: list, response_format: dict = None, deep_thinking_mode: bool = False) -> str:
     """调用 LLM API（非流式）- 支持豆包、千问、GLM等所有模型"""
     if not Config.LLM_API_KEY:
         raise HTTPException(status_code=500, detail="LLM API not configured")
@@ -34,6 +34,13 @@ async def call_llm_api(messages: list, response_format: dict = None) -> str:
 
     if response_format:
         payload["response_format"] = response_format
+    
+    # 如果启用深度思考模式，可以调整 temperature 或添加特殊提示
+    if deep_thinking_mode:
+        # 可以根据具体模型调整参数，例如设置更低的 temperature 以获得更严谨的思考
+        payload["temperature"] = 0.3
+        # 某些模型可能支持特殊的思考模式参数，可以在这里添加
+        # payload["enable_search"] = True  # 示例
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
@@ -46,7 +53,7 @@ async def call_llm_api(messages: list, response_format: dict = None) -> str:
         return result["choices"][0]["message"]["content"]
 
 
-async def call_llm_api_stream(messages: list) -> AsyncGenerator[str, None]:
+async def call_llm_api_stream(messages: list, deep_thinking_mode: bool = False) -> AsyncGenerator[str, None]:
     """流式调用 LLM API - 支持豆包、千问、GLM等所有模型"""
     if not Config.LLM_API_KEY:
         raise HTTPException(status_code=500, detail="LLM API not configured")
@@ -62,6 +69,24 @@ async def call_llm_api_stream(messages: list) -> AsyncGenerator[str, None]:
         "temperature": 0.7,
         "stream": True,
     }
+    
+    # 如果启用深度思考模式，调整参数
+    if deep_thinking_mode:
+        payload["temperature"] = 0.3
+    else:
+        # 如果未启用深度思考模式，明确在 System Prompt 中禁止输出思维过程
+        # 检查是否已有 system prompt，如果有则追加，没有则插入
+        system_instruction = "IMPORTANT: Do NOT output internal thought processes or <think> tags. Directly output the final response."
+        
+        has_system = False
+        for msg in messages:
+            if msg.get("role") == "system":
+                msg["content"] += f"\n\n{system_instruction}"
+                has_system = True
+                break
+        
+        if not has_system:
+            messages.insert(0, {"role": "system", "content": system_instruction})
 
     async with httpx.AsyncClient(timeout=120.0) as client:
         async with client.stream(

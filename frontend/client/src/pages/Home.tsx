@@ -12,6 +12,7 @@ import { useParams, useLocation } from "wouter";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useComposition } from "@/hooks/useComposition";
 import {
   FileSliders,
   Send,
@@ -22,6 +23,8 @@ import {
   MessageSquarePlus,
   FolderOpen,
   Pause,
+  Database,
+  Brain,
 } from "lucide-react";
 
 // 组件导入
@@ -32,6 +35,12 @@ import DownloadModal from "@/components/DownloadModal";
 import ShareModal from "@/components/ShareModal";
 import TaskFilesModal from "@/components/TaskFilesModal";
 import LoadingDots from "@/components/LoadingDots";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { KnowledgeBaseSelector } from "@/components/KnowledgeBaseSelector";
 
 // 类型导入
 import type {
@@ -52,8 +61,12 @@ import {
   getConversations,
   getConversationDetail,
   createConversation,
+  updateConversation,
   deleteConversation,
   getPPTProjects,
+  uploadFile,
+  type UploadResponse,
+  type DocumentResponse,
 } from "@/lib/api";
 
 // 模板数据 - 智谱清言风格（带预览图）
@@ -141,11 +154,76 @@ export default function Home() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<number | null>(null);
   const [currentConversationUuid, setCurrentConversationUuid] = useState<string | null>(null);
+  const [showKbSelector, setShowKbSelector] = useState(false);
+
+  // Popover state for file upload menus
+  const [homePopoverOpen, setHomePopoverOpen] = useState(false);
+  const [chatPopoverOpen, setChatPopoverOpen] = useState(false);
 
   // 聊天状态
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [activeAttachments, setActiveAttachments] = useState<UploadResponse[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // IME composition handling for home mode textarea
+  const homeComposition = useComposition<HTMLTextAreaElement>({
+    onKeyDown: (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        handleSendMessage();
+      }
+    }
+  });
+
+  // IME composition handling for chat mode textarea
+  const chatComposition = useComposition<HTMLTextAreaElement>({
+    onKeyDown: (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        handleSendMessage();
+      }
+    }
+  });
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      try {
+        const response = await uploadFile(file);
+        setActiveAttachments(prev => [...prev, response]);
+        toast.success("文件上传成功");
+        // Close the popover after successful upload
+        setHomePopoverOpen(false);
+        setChatPopoverOpen(false);
+      } catch (error) {
+        console.error("File upload failed:", error);
+        toast.error("文件上传失败");
+      } finally {
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+      }
+    }
+  };
+
+  const handleKbSelect = (docs: DocumentResponse[]) => {
+    const newAttachments: UploadResponse[] = docs.map(doc => ({
+      id: String(doc.id),
+      filename: doc.display_name || doc.filename,
+      file_path: "", // Managed by backend via knowledge_document_id
+      content_type: doc.file_type,
+      size: doc.file_size,
+      knowledge_document_id: doc.id
+    }));
+    setActiveAttachments(prev => [...prev, ...newAttachments]);
+    setShowKbSelector(false);
+    // Close the popover after selection
+    setHomePopoverOpen(false);
+    setChatPopoverOpen(false);
+    toast.success(`已添加 ${docs.length} 个知识库文件`);
+  };
   const [currentTopic, setCurrentTopic] = useState("");
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
 
@@ -183,6 +261,9 @@ export default function Home() {
   const [selectedCategory, setSelectedCategory] = useState<TemplateCategory>("全部");
   const [isPptMode, setIsPptMode] = useState(true);
 
+  // 深度思考模式状态
+  const [deepThinkingMode, setDeepThinkingMode] = useState(false);
+
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -190,6 +271,17 @@ export default function Home() {
   const isStreamingRef = useRef(false); // 跟踪是否正在进行本地流式传输
   const currentSessionIdRef = useRef<string | null>(null);
   const currentConversationIdRef = useRef<number | null>(null);
+  const thinkingModeForStreamRef = useRef(false);
+  const currentThinkingToolIdRef = useRef<string | null>(null);
+  const rightPanelOpenTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (rightPanelOpenTimerRef.current) {
+        clearTimeout(rightPanelOpenTimerRef.current);
+      }
+    };
+  }, []);
 
   // Sync Refs
   useEffect(() => {
@@ -462,6 +554,8 @@ export default function Home() {
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
 
+    thinkingModeForStreamRef.current = deepThinkingMode;
+
     const userMessage: Message = {
       id: `user-${Date.now()}`,
       role: "user",
@@ -471,6 +565,8 @@ export default function Home() {
 
     setMessages(prev => [...prev, userMessage]);
     setInputValue("");
+    const currentAttachments = activeAttachments;
+    setActiveAttachments([]);
     setIsLoading(true);
 
     // 更新当前对话的任务状态为 running
@@ -505,6 +601,8 @@ export default function Home() {
         body: JSON.stringify({
           instruction: userMessage.content,
           conversation_id: currentConversationId,
+          attachments: currentAttachments.length > 0 ? currentAttachments : undefined,
+          deep_thinking_mode: deepThinkingMode,
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -515,6 +613,7 @@ export default function Home() {
         body: JSON.stringify({
           instruction: userMessage.content,
           conversation_id: currentConversationId,
+          deep_thinking_mode: deepThinkingMode,
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -577,6 +676,52 @@ export default function Home() {
     }
   };
 
+  const appendToolCallToLastAssistant = (toolCall: ToolCall) => {
+    setMessages(prev => {
+      const lastMsg = prev[prev.length - 1];
+      if (lastMsg?.role === "assistant") {
+        return [
+          ...prev.slice(0, -1),
+          {
+            ...lastMsg,
+            toolCalls: [...(lastMsg.toolCalls || []), toolCall],
+          },
+        ];
+      }
+      return [
+        ...prev,
+        {
+          id: `assistant-${Date.now()}`,
+          role: "assistant",
+          content: "",
+          timestamp: Date.now(),
+          toolCalls: [toolCall],
+        },
+      ];
+    });
+  };
+
+  const updateToolCallById = (toolId: string, updater: (tool: ToolCall) => ToolCall) => {
+    setMessages(prev =>
+      prev.map(msg => {
+        if (!msg.toolCalls || msg.toolCalls.length === 0) return msg;
+        const updatedToolCalls = msg.toolCalls.map(tc => (tc.id === toolId ? updater(tc) : tc));
+        const changed = updatedToolCalls.some((tc, idx) => tc !== msg.toolCalls![idx]);
+        return changed ? { ...msg, toolCalls: updatedToolCalls } : msg;
+      })
+    );
+  };
+
+  const openRightPanelDeferred = useCallback((type: RightPanelType, delay = 180) => {
+    if (rightPanelOpenTimerRef.current) {
+      clearTimeout(rightPanelOpenTimerRef.current);
+    }
+    rightPanelOpenTimerRef.current = setTimeout(() => {
+      setRightPanelType(type);
+      setShowRightPanel(true);
+    }, delay);
+  }, []);
+
   const handleStreamEvent = (data: any) => {
     // 收到任何事件时，取消确认加载状态
     if (isConfirming) {
@@ -627,8 +772,7 @@ export default function Home() {
 
       case "task_plan_stream":
         setTaskPlanStreaming(true);
-        setShowRightPanel(true);
-        setRightPanelType("task_plan");
+        openRightPanelDeferred("task_plan");
         setTaskPlan(prev => ({
           ...prev,
           streamContent: (prev?.streamContent || "") + data.content,
@@ -653,8 +797,7 @@ export default function Home() {
           },
         ]);
         setCurrentSearchRound(data.round);
-        setShowRightPanel(true);
-        setRightPanelType("web_search");
+        openRightPanelDeferred("web_search");
         break;
 
       case "search_result":
@@ -676,35 +819,96 @@ export default function Home() {
         break;
 
       case "deep_thinking_start":
+        if (!thinkingModeForStreamRef.current) break;
         // 深度思考开始，清空之前的内容并显示搜索面板
         setDeepThinking("");
         setDeepThinkingStreaming(true);
-        setShowRightPanel(true);
-        setRightPanelType("web_search");
+        {
+          const toolId = `deep-thinking-${Date.now()}`;
+          currentThinkingToolIdRef.current = toolId;
+          appendToolCallToLastAssistant({
+            id: toolId,
+            type: "deep_thinking",
+            name: "深度思考",
+            status: "running",
+            data: { content: "" },
+          });
+        }
+        openRightPanelDeferred("web_search");
         break;
 
       case "deep_thinking_stream":
+        if (!thinkingModeForStreamRef.current) break;
         setDeepThinkingStreaming(true);
         setDeepThinking(prev => prev + data.content);
+        {
+          const toolId = currentThinkingToolIdRef.current;
+          if (toolId) {
+            updateToolCallById(toolId, (tool) => {
+              const prevContent =
+                typeof tool.data?.content === "string" ? tool.data.content : "";
+              return {
+                ...tool,
+                status: "running",
+                data: { ...tool.data, content: prevContent + (data.content || "") },
+              };
+            });
+          } else {
+            const newToolId = `deep-thinking-${Date.now()}`;
+            currentThinkingToolIdRef.current = newToolId;
+            appendToolCallToLastAssistant({
+              id: newToolId,
+              type: "deep_thinking",
+              name: "深度思考",
+              status: "running",
+              data: { content: data.content || "" },
+            });
+          }
+        }
         break;
 
       case "deep_thinking_complete":
+        if (!thinkingModeForStreamRef.current) break;
         setDeepThinkingStreaming(false);
         // 使用后端发送的完整内容，而不是状态中的 deepThinking
-        const completeThinking = data.content || deepThinking;
-        setSearchRounds(prev =>
-          prev.map(r =>
-            r.round === currentSearchRound
-              ? { ...r, thinking: completeThinking }
-              : r
-          )
-        );
+        {
+          const completeThinking = data.content || deepThinking;
+          setSearchRounds(prev =>
+            prev.map(r =>
+              r.round === currentSearchRound
+                ? { ...r, thinking: completeThinking }
+                : r
+            )
+          );
+          const toolId = currentThinkingToolIdRef.current;
+          if (toolId) {
+            updateToolCallById(toolId, (tool) => {
+              const prevContent =
+                typeof tool.data?.content === "string" ? tool.data.content : "";
+              return {
+                ...tool,
+                status: "completed",
+                data: { ...tool.data, content: completeThinking || prevContent },
+              };
+            });
+          } else if (completeThinking) {
+            const newToolId = `deep-thinking-${Date.now()}`;
+            currentThinkingToolIdRef.current = newToolId;
+            appendToolCallToLastAssistant({
+              id: newToolId,
+              type: "deep_thinking",
+              name: "深度思考",
+              status: "completed",
+              data: { content: completeThinking },
+            });
+          }
+          currentThinkingToolIdRef.current = null;
+        }
         break;
 
       case "ppt_outline_stream":
         setPptOutlineStreaming(true);
-        setShowRightPanel(true);
-        setRightPanelType("ppt_outline");
+        openRightPanelDeferred("ppt_outline");
         setPptOutline(prev => prev + data.content);
         break;
 
@@ -714,8 +918,7 @@ export default function Home() {
 
       case "ppt_slide":
         setPptHtmlCode(prev => prev + data.html);
-        setShowRightPanel(true);
-        setRightPanelType("ppt_preview");
+        openRightPanelDeferred("ppt_preview");
         break;
 
       case "ppt_complete":
@@ -814,8 +1017,7 @@ export default function Home() {
         streaming: planData.streaming || false,
       };
       setTaskPlan(taskPlanData);
-      setShowRightPanel(true);
-      setRightPanelType("task_plan");
+      openRightPanelDeferred("task_plan");
     }
 
     // 处理搜索工具
@@ -850,16 +1052,14 @@ export default function Home() {
         ];
       });
       setCurrentSearchRound(round);
-      setShowRightPanel(true);
-      setRightPanelType("web_search");
+      openRightPanelDeferred("web_search");
     }
 
     // 处理 PPT 大纲工具
     if (data.tool_type === "ppt_outline") {
       const outlineData = data.data as any;
       setPptOutline(outlineData.content || "");
-      setShowRightPanel(true);
-      setRightPanelType("ppt_outline");
+      openRightPanelDeferred("ppt_outline");
     }
 
     // 处理 PPT 幻灯片创建工具
@@ -867,8 +1067,7 @@ export default function Home() {
     // 这里只需要处理工具调用的显示（按钮）
     if (data.tool_type === "create_slide" || data.tool_type === "ppt_generate") {
       // 打开 PPT 预览面板
-      setShowRightPanel(true);
-      setRightPanelType("ppt_preview");
+      openRightPanelDeferred("ppt_preview");
     }
   };
 
@@ -903,6 +1102,7 @@ export default function Home() {
 
   const handleConfirmInfo = async (toolCallId: string, selectedData: Record<string, unknown>) => {
     cancelAutoConfirm();
+    thinkingModeForStreamRef.current = deepThinkingMode;
 
     // 立即更新工具状态，让卡片立即折叠
     // 立即更新工具状态，让卡片立即折叠
@@ -1126,6 +1326,23 @@ export default function Home() {
               </span>
             </div>
             <div className="flex items-center gap-2">
+              {/* 深度思考模式开关 */}
+              <button
+                onClick={() => setDeepThinkingMode(!deepThinkingMode)}
+                className={cn(
+                  "p-2 rounded-lg transition-colors flex items-center gap-2",
+                  deepThinkingMode
+                    ? "bg-blue-500 text-white hover:bg-blue-600"
+                    : "hover:bg-muted text-muted-foreground"
+                )}
+                title={deepThinkingMode ? "关闭深度思考模式" : "开启深度思考模式"}
+              >
+                <Brain className="h-4 w-4" />
+                <span className="text-xs font-medium">
+                  {deepThinkingMode ? "深度思考" : "快速响应"}
+                </span>
+              </button>
+
               {/* 文件按钮 - 始终显示 */}
               <button
                 onClick={() => setShowTaskFilesModal(true)}
@@ -1156,17 +1373,30 @@ export default function Home() {
 
                     {/* 大输入框 - 智谱清言风格 */}
                     <div className="border border-border rounded-2xl bg-background shadow-sm overflow-hidden">
+                      {/* 附件预览 */}
+                      {activeAttachments.length > 0 && (
+                        <div className="flex flex-wrap gap-2 px-5 pt-3">
+                          {activeAttachments.map(file => (
+                            <div key={file.id} className="flex items-center gap-1 bg-muted px-2 py-1 rounded-md text-sm border border-border">
+                              <span className="truncate max-w-[150px]">{file.filename}</span>
+                              <button
+                                onClick={() => setActiveAttachments(prev => prev.filter(f => f.id !== file.id))}
+                                className="hover:text-destructive transition-colors"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       {/* 输入区域 */}
                       <textarea
                         ref={inputRef}
                         value={inputValue}
                         onChange={e => setInputValue(e.target.value)}
-                        onKeyDown={e => {
-                          if (e.key === "Enter" && !e.shiftKey) {
-                            e.preventDefault();
-                            handleSendMessage();
-                          }
-                        }}
+                        onCompositionStart={homeComposition.onCompositionStart}
+                        onCompositionEnd={homeComposition.onCompositionEnd}
+                        onKeyDown={homeComposition.onKeyDown}
                         placeholder="告诉我PPT的主题或内容"
                         className="w-full px-5 pt-5 pb-3 bg-transparent resize-none focus:outline-none min-h-[80px] max-h-[200px] text-base"
                         rows={2}
@@ -1176,12 +1406,49 @@ export default function Home() {
                       <div className="flex items-center justify-between px-4 py-3 border-t border-border/50">
                         {/* 左侧按钮 */}
                         <div className="flex items-center gap-1">
-                          <button className="p-2 hover:bg-muted rounded-lg transition-colors">
-                            <Paperclip className="h-5 w-5 text-muted-foreground" />
+                          <Popover open={homePopoverOpen} onOpenChange={setHomePopoverOpen}>
+                            <PopoverTrigger asChild>
+                              <button className="p-2 hover:bg-muted rounded-lg transition-colors">
+                                <Paperclip className="h-5 w-5 text-muted-foreground" />
+                              </button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-48 p-0" align="start">
+                              <div className="flex flex-col">
+                                <button
+                                  onClick={() => setShowKbSelector(true)}
+                                  className="flex items-center gap-2 px-4 py-2 hover:bg-muted text-sm text-left transition-colors"
+                                >
+                                  <Database className="h-4 w-4" />
+                                  <span>云知识库选择</span>
+                                </button>
+                                <button
+                                  onClick={() => fileInputRef.current?.click()}
+                                  className="flex items-center gap-2 px-4 py-2 hover:bg-muted text-sm text-left transition-colors"
+                                >
+                                  <Paperclip className="h-4 w-4" />
+                                  <span>本地文件选择</span>
+                                </button>
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+
+                          {/* 深度思考模式开关 */}
+                          <button
+                            onClick={() => setDeepThinkingMode(!deepThinkingMode)}
+                            className={cn(
+                              "p-2 rounded-lg transition-colors flex items-center gap-1.5",
+                              deepThinkingMode
+                                ? "bg-blue-500 text-white hover:bg-blue-600"
+                                : "hover:bg-muted text-muted-foreground"
+                            )}
+                            title={deepThinkingMode ? "关闭深度思考模式" : "开启深度思考模式"}
+                          >
+                            <Brain className="h-4 w-4" />
+                            <span className="text-xs font-medium">
+                              {deepThinkingMode ? "深度模式" : "快速模式"}
+                            </span>
                           </button>
-                          <button className="p-2 hover:bg-muted rounded-lg transition-colors">
-                            <Settings className="h-5 w-5 text-muted-foreground" />
-                          </button>
+
                           {/* PPT 模式标签 */}
                           {isPptMode && (
                             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 rounded-lg ml-2">
@@ -1276,12 +1543,15 @@ export default function Home() {
             </ScrollArea>
           ) : (
             // 聊天模式
-            <ScrollArea className="h-full">
-              <div className="max-w-3xl mx-auto p-6">
+            <ScrollArea className="h-full chat-surface">
+              <div className="max-w-4xl mx-auto px-6 py-8">
                 {messages.map((message, index) => {
                   const isFirstAiMessage =
                     message.role === "assistant" &&
-                    messages.slice(0, index).filter(m => m.role === "assistant").length === 0;
+                    (index === 0 || messages[index - 1]?.role !== "assistant");
+                  const isFirstUserMessage =
+                    message.role === "user" &&
+                    (index === 0 || messages[index - 1]?.role !== "user");
 
                   return (
                     <MessageItem
@@ -1293,8 +1563,10 @@ export default function Home() {
                       autoConfirmCountdown={autoConfirmCountdown}
                       onCancelAutoConfirm={cancelAutoConfirm}
                       isFirstAiMessage={isFirstAiMessage}
+                      isFirstUserMessage={isFirstUserMessage}
                       onSetSearchRound={setCurrentSearchRound}
                       onScrollToSlide={handleScrollToSlide}
+                      showThinking={deepThinkingMode}
                     />
                   );
                 })}
@@ -1304,24 +1576,26 @@ export default function Home() {
                   return (
                     <div className="mb-6">
                       {isFirstAiResponse ? (
-                        // 首次 AI 响应：保持原样
-                        <>
-                          <div className="flex items-center gap-2 mb-3">
-                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-sm shrink-0">
-                              <svg viewBox="0 0 24 24" className="w-5 h-5 text-white" fill="currentColor">
-                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
-                              </svg>
+                        // 首次 AI 响应：使用统一的气泡风格
+                        <div className="flex gap-3">
+                          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center shrink-0 mt-0.5 border border-primary/20 shadow-sm">
+                            <svg viewBox="0 0 24 24" className="w-5 h-5 text-primary" fill="currentColor">
+                              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+                            </svg>
+                          </div>
+                          <div className="flex-1 min-w-0 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium text-foreground/80">SlideAgent</span>
+                              <span className="text-xs text-muted-foreground/60">正在思考</span>
                             </div>
-                            <span className="text-sm font-medium text-foreground">SlideAgent</span>
-                            <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">AI</span>
+                            <div className="assistant-bubble">
+                              <span className="text-sm text-muted-foreground">让我先核对下本轮任务的目标和重点偏好，正在梳理您的需求~</span>
+                              <span className="inline-flex items-center ml-2">
+                                <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                              </span>
+                            </div>
                           </div>
-                          <div className="ml-10">
-                            <span className="text-sm text-muted-foreground">让我先核对下本轮任务的目标和重点偏好，正在梳理您的需求~</span>
-                            <span className="inline-flex items-center ml-1">
-                              <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                            </span>
-                          </div>
-                        </>
+                        </div>
                       ) : (
                         // 后续响应：使用新的加载动画
                         <div className="flex items-center gap-2">
@@ -1352,30 +1626,62 @@ export default function Home() {
         {/* 输入框 - 只在聊天模式下显示 */}
         {mode === "chat" && (
           <div className="p-4 border-t border-border bg-background shrink-0">
-            <div className="max-w-3xl mx-auto">
+            <div className="max-w-4xl mx-auto">
               <div className="relative">
+                {/* 附件预览 */}
+                {activeAttachments.length > 0 && (
+                  <div className="flex flex-wrap gap-2 px-4 pb-2">
+                    {activeAttachments.map(file => (
+                      <div key={file.id} className="flex items-center gap-1 bg-muted px-2 py-1 rounded-md text-sm border border-border">
+                        <span className="truncate max-w-[150px]">{file.filename}</span>
+                        <button
+                          onClick={() => setActiveAttachments(prev => prev.filter(f => f.id !== file.id))}
+                          className="hover:text-destructive transition-colors"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <textarea
                   ref={inputRef}
                   value={inputValue}
                   onChange={e => setInputValue(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendMessage();
-                    }
-                  }}
+                  onCompositionStart={chatComposition.onCompositionStart}
+                  onCompositionEnd={chatComposition.onCompositionEnd}
+                  onKeyDown={chatComposition.onKeyDown}
                   placeholder="想调整内容、样式或风格等吗，直接告诉我吧"
                   className="w-full px-4 py-3 pr-24 rounded-xl border border-border bg-background resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 min-h-[52px] max-h-[200px]"
                   rows={1}
                 />
 
                 <div className="absolute right-2 bottom-2 flex items-center gap-1">
-                  <button className="p-2 hover:bg-muted rounded-lg transition-colors">
-                    <Paperclip className="h-4 w-4 text-muted-foreground" />
-                  </button>
-                  <button className="p-2 hover:bg-muted rounded-lg transition-colors">
-                    <Settings className="h-4 w-4 text-muted-foreground" />
-                  </button>
+                  <Popover open={chatPopoverOpen} onOpenChange={setChatPopoverOpen}>
+                    <PopoverTrigger asChild>
+                      <button className="p-2 hover:bg-muted rounded-lg transition-colors">
+                        <Paperclip className="h-4 w-4 text-muted-foreground" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-48 p-0" align="start">
+                      <div className="flex flex-col">
+                        <button
+                          onClick={() => setShowKbSelector(true)}
+                          className="flex items-center gap-2 px-4 py-2 hover:bg-muted text-sm text-left transition-colors"
+                        >
+                          <Database className="h-4 w-4" />
+                          <span>云知识库选择</span>
+                        </button>
+                        <button
+                          onClick={() => fileInputRef.current?.click()}
+                          className="flex items-center gap-2 px-4 py-2 hover:bg-muted text-sm text-left transition-colors"
+                        >
+                          <Paperclip className="h-4 w-4" />
+                          <span>本地文件选择</span>
+                        </button>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
 
                   {/* PPT 模式标签 */}
                   {isPptMode && (
@@ -1479,26 +1785,30 @@ export default function Home() {
       />
 
       {/* 下载弹窗 */}
-      {pptProject && (
-        <DownloadModal
-          isOpen={showDownloadModal}
-          onClose={() => setShowDownloadModal(false)}
-          projectId={pptProject.id}
-          versionId={pptProject.current_version?.id}
-          title={pptProject.title}
-        />
-      )}
+      {
+        pptProject && (
+          <DownloadModal
+            isOpen={showDownloadModal}
+            onClose={() => setShowDownloadModal(false)}
+            projectId={pptProject.id}
+            versionId={pptProject.current_version?.id}
+            title={pptProject.title}
+          />
+        )
+      }
 
       {/* 分享弹窗 */}
-      {pptProject && (
-        <ShareModal
-          isOpen={showShareModal}
-          onClose={() => setShowShareModal(false)}
-          projectId={pptProject.id}
-          versionId={pptProject.current_version?.id}
-          title={pptProject.title}
-        />
-      )}
+      {
+        pptProject && (
+          <ShareModal
+            isOpen={showShareModal}
+            onClose={() => setShowShareModal(false)}
+            projectId={pptProject.id}
+            versionId={pptProject.current_version?.id}
+            title={pptProject.title}
+          />
+        )
+      }
 
       {/* 任务文件对话框 */}
       <TaskFilesModal
@@ -1512,6 +1822,19 @@ export default function Home() {
           setRightPanelType("ppt_preview");
         }}
       />
-    </div>
+
+      {/* 知识库选择器 */}
+      <KnowledgeBaseSelector
+        open={showKbSelector}
+        onOpenChange={setShowKbSelector}
+        onSelect={handleKbSelect}
+      />
+      <input
+        type="file"
+        ref={fileInputRef}
+        className="hidden"
+        onChange={handleFileSelect}
+      />
+    </div >
   );
 }

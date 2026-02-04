@@ -213,6 +213,26 @@
     box-shadow: 0 4px 12px oklch(0 0 0 / 0.06), 0 2px 4px oklch(0 0 0 / 0.03);
   }
 
+  /* 对话背景与气泡 */
+  .chat-surface {
+    background:
+      radial-gradient(1200px 600px at 8% -10%, oklch(0.98 0.02 250 / 0.8), transparent 60%),
+      radial-gradient(900px 480px at 92% -20%, oklch(0.97 0.02 40 / 0.7), transparent 55%),
+      linear-gradient(180deg, oklch(0.99 0.004 250) 0%, oklch(0.975 0.006 250) 100%);
+  }
+
+  .assistant-bubble {
+    @apply bg-card/80 border border-border/60 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm backdrop-blur-sm;
+  }
+
+  .user-bubble {
+    @apply bg-gradient-to-br from-primary to-primary/80 text-primary-foreground border border-primary/20 rounded-2xl rounded-tr-sm px-4 py-3 shadow-md;
+  }
+
+  .thinking-pill {
+    @apply inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs bg-muted/70 text-muted-foreground border border-border/60;
+  }
+
   /* 工具卡片 */
   .tool-card {
     @apply bg-card rounded-xl border border-border transition-all duration-200;

@@ -10,6 +10,11 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.endpoints import router
+from app.utils.icon_assets import (
+    DEFAULT_MATERIAL_SYMBOLS_MOUNT,
+    get_material_symbols_dir,
+)
+from app.utils.font_assets import DEFAULT_FONTS_MOUNT, get_font_dir
 from app.utils.browser import cleanup_browser_pool, get_browser_pool
 
 # Configure logging
@@ -58,7 +63,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Static files mount removed (Pure Python NBLM)
+# Static files: Material Symbols SVGs for icon export
+material_symbols_dir = get_material_symbols_dir()
+if material_symbols_dir:
+    app.mount(
+        DEFAULT_MATERIAL_SYMBOLS_MOUNT,
+        StaticFiles(directory=str(material_symbols_dir)),
+        name="material-symbols",
+    )
+    logger.info(
+        "Serving Material Symbols from %s at %s",
+        material_symbols_dir,
+        DEFAULT_MATERIAL_SYMBOLS_MOUNT,
+    )
+else:
+    logger.warning("Material Symbols directory not found; icon exports may be missing.")
+
+fonts_dir = get_font_dir()
+if fonts_dir:
+    app.mount(DEFAULT_FONTS_MOUNT, StaticFiles(directory=str(fonts_dir)), name="fonts")
+    logger.info("Serving fonts from %s at %s", fonts_dir, DEFAULT_FONTS_MOUNT)
+else:
+    logger.warning("Fonts directory not found; font embedding may be skipped.")
 
 # Include API router with new prefix
 app.include_router(router, prefix="/api/export_tool")

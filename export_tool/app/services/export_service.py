@@ -1,11 +1,10 @@
 """
 Unified export service - supports PDF, PNG, HTML, and PPTX exports
 """
-import os
-import io
 import zipfile
 import logging
 import asyncio
+import shutil
 from typing import List, Tuple
 from pathlib import Path
 from datetime import datetime
@@ -49,6 +48,20 @@ class ExportService:
                 styles.append(style_tag.string)
         
         return '\n'.join(styles)
+
+    def _extract_body_attrs(self, html: str) -> Tuple[List[str], str, dict]:
+        """Extract body classes/style/attributes from HTML"""
+        soup = BeautifulSoup(html, 'html.parser')
+        body = soup.body
+        if not body:
+            return [], "", {}
+        
+        classes = body.get("class", [])
+        if isinstance(classes, str):
+            classes = classes.split()
+        style = body.get("style", "")
+        attrs = {k: v for k, v in body.attrs.items() if k not in ("class", "style")}
+        return classes, style, attrs
     
     def _scope_css(self, css: str, scope_class: str) -> str:
         """Add scoping to CSS to avoid conflicts - Enhanced version"""
@@ -197,6 +210,47 @@ class ExportService:
 </html>'''
         
         return merged_html
+
+    def _merge_slides_for_pptx(self, slides_html: List[str]) -> Tuple[str, str]:
+        """Merge slides into HTML/CSS payload for dom-to-pptx conversion"""
+        import html as html_module
+        
+        slide_blocks = []
+        scoped_styles = []
+        
+        for i, slide_html in enumerate(slides_html):
+            body_content = self._extract_body_content(slide_html)
+            style_content = self._extract_style_content(slide_html)
+            scoped_style = self._scope_css(style_content, f"slide-{i+1}")
+            if scoped_style:
+                scoped_styles.append(scoped_style)
+            
+            body_classes, body_style, body_attrs = self._extract_body_attrs(slide_html)
+            class_list = ["ppt-slide", f"slide-{i+1}"] + body_classes
+            attr_parts = [f'class="{html_module.escape(" ".join(class_list), quote=True)}"']
+            
+            if body_style:
+                attr_parts.append(f'style="{html_module.escape(body_style, quote=True)}"')
+            
+            for key, value in body_attrs.items():
+                attr_parts.append(f'{key}="{html_module.escape(str(value), quote=True)}"')
+            
+            slide_blocks.append(f'<div {" ".join(attr_parts)}>{body_content}</div>')
+        
+        base_css = f"""
+        .ppt-slide {{
+            width: {self.slide_width}px;
+            height: {self.slide_height}px;
+            position: relative;
+            overflow: hidden;
+        }}
+        .ppt-slide * {{
+            box-sizing: border-box;
+        }}
+        """
+        combined_css = base_css + "\n" + "\n".join(scoped_styles)
+        
+        return "\n".join(slide_blocks), combined_css
     
     async def export_to_pdf(
         self,
@@ -445,29 +499,39 @@ class ExportService:
         title: str = "presentation",
         options: PptxOptions = None
     ) -> Tuple[str, str]:
-        """Export slides to PPTX using NBLM Service (PDF -> PPTX)"""
+        """Export slides to PPTX using dom-to-pptx"""
         try:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            pptx_filename = f"{title}_{timestamp}.pptx"
-            pptx_filepath = EXPORT_DIR / pptx_filename
+            requested_filename = options.fileName if options and options.fileName else ""
+            pptx_filename = requested_filename or f"{title}_{timestamp}.pptx"
+            safe_filename = Path(pptx_filename).name or f"{title}_{timestamp}.pptx"
+            pptx_filepath = EXPORT_DIR / safe_filename
             
-            logger.info(f"Generating PPTX via NBLM service for {len(slides_html)} slides...")
+            logger.info(f"Generating PPTX via dom-to-pptx for {len(slides_html)} slides...")
             
-            # Step 1: Export to PDF first (High fidelity)
-            pdf_path, _ = await self.export_to_pdf(slides_html, title=f"temp_{timestamp}")
+            logger.info("Staticizing slides for PPTX export...")
+            slides_html = await batch_staticize_html(slides_html, timeout=30)
             
-            # Step 2: Convert PDF to PPTX using NBLM Service
-            from app.services.nblm_service import export_tool_service
+            pptx_html, pptx_css = self._merge_slides_for_pptx(slides_html)
             
-            # Use nblm_service to process the PDF
-            # This handles text removal (AI) + Text reconstruction (AI)
-            await export_tool_service.process_pdf(pdf_path, str(pptx_filepath))
+            if options:
+                pptx_options = options.copy()
+                pptx_options.fileName = safe_filename
+            else:
+                pptx_options = PptxOptions(fileName=safe_filename)
             
-            # Cleanup PDF
-            try:
-                os.unlink(pdf_path)
-            except:
-                pass
+            request = HtmlToPptxRequest(
+                html=pptx_html,
+                css=pptx_css,
+                options=pptx_options
+            )
+            
+            temp_path, _ = await generate_pptx_from_html(request)
+            temp_path = Path(temp_path)
+            
+            if temp_path != pptx_filepath:
+                pptx_filepath.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(temp_path), str(pptx_filepath))
             
             # Verify file
             if not pptx_filepath.exists():
@@ -478,7 +542,7 @@ class ExportService:
                 raise Exception(f"PPTX file may be corrupted, size: {file_size} bytes")
             
             logger.info(f"✅ PPTX exported successfully: {pptx_filepath} ({file_size:,} bytes)")
-            return str(pptx_filepath), pptx_filename
+            return str(pptx_filepath), safe_filename
             
         except Exception as e:
             logger.error(f"❌ Failed to export PPTX: {e}")

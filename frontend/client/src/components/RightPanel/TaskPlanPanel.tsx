@@ -1,6 +1,36 @@
 import { RefObject } from "react";
 import { Loader2 } from "lucide-react";
+import ThinkingBlock from "@/components/ThinkingBlock";
 import type { TaskPlan } from "@/types";
+
+interface ThinkBlock {
+  content: string;
+  status: "thinking" | "completed";
+}
+
+function parseThinkTags(content: string): { thinkBlocks: ThinkBlock[]; normalContent: string } {
+  const thinkRegex = /<think>([\s\S]*?)<\/think>/gi;
+  const thinkBlocks: ThinkBlock[] = [];
+
+  let normalContent = content.replace(thinkRegex, (_match, p1) => {
+    thinkBlocks.push({ content: p1.trim(), status: "completed" });
+    return "";
+  });
+
+  const pendingThinkRegex = /<think>([\s\S]*)$/i;
+  const pendingMatch = pendingThinkRegex.exec(normalContent);
+  if (pendingMatch) {
+    thinkBlocks.push({ content: pendingMatch[1].trim(), status: "thinking" });
+    normalContent = normalContent.replace(pendingThinkRegex, "");
+  }
+
+  const potentialTagRegex = /<(?:t(?:h(?:i(?:n(?:k)?)?)?)?)?$/i;
+  if (potentialTagRegex.test(normalContent) && !normalContent.endsWith(">")) {
+    normalContent = normalContent.replace(potentialTagRegex, "");
+  }
+
+  return { thinkBlocks, normalContent: normalContent.trim() };
+}
 
 interface TaskPlanPanelProps {
   taskPlan: TaskPlan | null;
@@ -23,17 +53,33 @@ export default function TaskPlanPanel({
       )}
 
       {/* 流式内容显示 */}
-      {taskPlan?.streamContent && (
-        <div
-          ref={taskPlanContentRef}
-          className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap"
-        >
-          {taskPlan.streamContent}
-          {taskPlanStreaming && (
-            <span className="inline-block w-2 h-4 bg-primary animate-pulse ml-1" />
-          )}
-        </div>
-      )}
+      {taskPlan?.streamContent && (() => {
+        const { thinkBlocks, normalContent } = parseThinkTags(taskPlan.streamContent);
+        return (
+          <div ref={taskPlanContentRef} className="space-y-3">
+            {thinkBlocks.length > 0 && (
+              <div className="space-y-2">
+                {thinkBlocks.map((block, idx) => (
+                  <ThinkingBlock
+                    key={idx}
+                    content={block.content}
+                    status={block.status}
+                    defaultExpanded={block.status === "thinking"}
+                  />
+                ))}
+              </div>
+            )}
+            {normalContent && (
+              <div className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
+                {normalContent}
+                {taskPlanStreaming && (
+                  <span className="inline-block w-2 h-4 bg-primary animate-pulse ml-1" />
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* 结构化内容显示 */}
       {taskPlan && !taskPlan.streamContent && (

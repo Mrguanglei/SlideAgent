@@ -9,8 +9,10 @@ import {
   CheckCircle2,
   Loader2,
   CalendarCheck,
+  Brain,
 } from "lucide-react";
 import type { ToolCall, RightPanelType } from "@/types";
+import ThinkingBlock from "./ThinkingBlock";
 
 // 工具调用卡片 Props
 interface ToolCallCardProps {
@@ -88,6 +90,8 @@ export default function ToolCallCard({
         return <FileSliders className="h-3.5 w-3.5 text-primary" />;
       case "ppt_generate":
         return <FileSliders className="h-3.5 w-3.5 text-white" />;
+      case "deep_thinking":
+        return <Brain className="h-3.5 w-3.5 text-primary" />;
       default:
         return <FileSliders className="h-3.5 w-3.5 text-primary" />;
     }
@@ -566,6 +570,51 @@ export default function ToolCallCard({
             <span className="tool-button-query">{slideTitle}</span>
             <ChevronRight className="tool-button-arrow h-4 w-4" />
           </button>
+        );
+
+      case "deep_thinking":
+        const thinkingData = tool.data as { content?: string };
+        const thinkingContent = thinkingData.content || "";
+        const thinkingStatus = tool.status === "running" ? "thinking" : "completed";
+        const hasThinkingContent = thinkingContent.trim().length > 0;
+
+        return (
+          <div className="tool-card">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center">
+                  {getIcon()}
+                </div>
+                <span className="font-medium text-sm">思考过程</span>
+                {tool.status === "running" && (
+                  <span className="status-auto">进行中</span>
+                )}
+                {tool.status === "completed" && (
+                  <span className="status-confirmed">已完成</span>
+                )}
+              </div>
+            </div>
+            <div className="px-4 pb-4 pt-3">
+              {hasThinkingContent ? (
+                <ThinkingBlock
+                  content={thinkingContent}
+                  status={thinkingStatus}
+                  defaultExpanded={thinkingStatus === "thinking" || isShareMode}
+                />
+              ) : (
+                <div className="thinking-pill">
+                  {tool.status === "running" ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>思考中...</span>
+                    </>
+                  ) : (
+                    <span>思考完毕</span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         );
 
       default:

@@ -16,7 +16,14 @@ export interface Message {
 // 工具调用类型
 export interface ToolCall {
   id: string;
-  type: "task_plan" | "web_search" | "image_search" | "supplement_info" | "ppt_outline" | "ppt_generate";
+  type:
+    | "task_plan"
+    | "web_search"
+    | "image_search"
+    | "supplement_info"
+    | "ppt_outline"
+    | "ppt_generate"
+    | "deep_thinking";
   name: string;
   status: "pending" | "confirmed" | "auto_execute" | "running" | "completed" | "error";
   data: ToolCallData;

@@ -1,0 +1,12 @@
+version: '3.9'
+services:
+  dom-to-pptx:
+    build:
+      context: .
+      args:
+        NPM_REGISTRY: https://registry.npmmirror.com
+    ports:
+      - "5173:80"
+    volumes:
+      - ./material-design-icons/symbols/web:/usr/share/nginx/html/material-design-icons/symbols/web:ro
+    container_name: dom-to-pptx-demo

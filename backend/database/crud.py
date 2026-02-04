@@ -16,7 +16,8 @@ from .models import (
     Conversation, Message, ToolCall,
     SearchRound, SearchResult, TaskPlan,
     PPTProject, PPTVersion, PPTSlide,
-    Share, Session, PPTExport
+    Share, Session, PPTExport, MessageAttachment,
+    KnowledgeDocument
 )
 
 logger = logging.getLogger(__name__)
@@ -179,6 +180,40 @@ async def update_message_content(
     stmt = update(Message).where(Message.id == message_id).values(content=content)
     result = await db.execute(stmt)
     return result.rowcount > 0
+
+
+async def create_message_attachment(
+    db: AsyncSession,
+    message_id: int,
+    filename: str,
+    file_path: str,
+    file_size: int = 0,
+    content_type: Optional[str] = None
+) -> MessageAttachment:
+    """创建消息附件"""
+    attachment = MessageAttachment(
+        message_id=message_id,
+        filename=filename,
+        file_path=file_path,
+        file_size=file_size,
+        content_type=content_type
+    )
+    db.add(attachment)
+    await db.flush()
+    await db.refresh(attachment)
+    return attachment
+
+
+async def get_message_attachments(
+    db: AsyncSession,
+    message_id: int
+) -> List[MessageAttachment]:
+    """获取消息的所有附件"""
+    query = select(MessageAttachment).where(
+        MessageAttachment.message_id == message_id
+    )
+    result = await db.execute(query)
+    return list(result.scalars().all())
 
 
 # ==================== 工具调用相关操作 ====================
@@ -1038,5 +1073,15 @@ async def delete_ppt_export(
     )
     result = await db.execute(stmt)
     return result.rowcount > 0
+
+
+async def get_knowledge_document(
+    db: AsyncSession,
+    document_id: int
+) -> Optional[KnowledgeDocument]:
+    """获取知识库文档"""
+    query = select(KnowledgeDocument).where(KnowledgeDocument.id == document_id)
+    result = await db.execute(query)
+    return result.scalar_one_or_none()
 
 

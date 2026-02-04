@@ -64,11 +64,28 @@ class Message(Base):
     
     # 关系
     conversation = relationship("Conversation", back_populates="messages")
+    attachments = relationship("MessageAttachment", back_populates="message", cascade="all, delete-orphan")
     tool_calls = relationship("ToolCall", back_populates="message", cascade="all, delete-orphan")
     
     __table_args__ = (
         Index("idx_message_conversation_created", "conversation_id", "created_at"),
     )
+
+
+class MessageAttachment(Base):
+    """消息附件表 - 存储聊天中上传的文件"""
+    __tablename__ = "message_attachments"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid_lib.uuid4()))
+    message_id = Column(BigInteger, ForeignKey("messages.id", ondelete="CASCADE"), nullable=False, index=True)
+    filename = Column(String(255), nullable=False)
+    file_path = Column(String(500), nullable=False)
+    file_size = Column(BigInteger, default=0)
+    content_type = Column(String(100), nullable=True)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+    # 关系
+    message = relationship("Message", back_populates="attachments")
 
 
 class ToolCall(Base):
