@@ -15,6 +15,9 @@ import {
   PanelLeftClose,
   Search,
   BookOpen,
+  MoreHorizontal,
+  Pin,
+  Pencil,
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -28,6 +31,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import type { Conversation } from "@/types";
 import SearchDialog from "./SearchDialog";
 
@@ -36,6 +44,8 @@ interface ConversationSidebarProps {
   currentConversationId: number | null;
   onSelectConversation: (conversation: Conversation) => void;
   onDeleteConversation: (conversationId: number) => void;
+  onRenameConversation?: (conversationId: number, newTitle: string) => void;
+  onPinConversation?: (conversationId: number, pinned: boolean) => void;
   onNewChat: () => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
@@ -46,6 +56,8 @@ export default function ConversationSidebar({
   currentConversationId,
   onSelectConversation,
   onDeleteConversation,
+  onRenameConversation,
+  onPinConversation,
   onNewChat,
   collapsed,
   onToggleCollapse,
@@ -58,10 +70,19 @@ export default function ConversationSidebar({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<number | null>(null);
 
+  // 重命名弹窗状态
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [conversationToRename, setConversationToRename] = useState<number | null>(null);
+  const [newTitle, setNewTitle] = useState("");
+
+  // 菜单打开状态
+  const [openMenuId, setOpenMenuId] = useState<number | null>(null);
+
   const handleDeleteClick = (e: React.MouseEvent, id: number) => {
     e.stopPropagation();
     setConversationToDelete(id);
     setDeleteDialogOpen(true);
+    setOpenMenuId(null);
   };
 
   const handleConfirmDelete = () => {
@@ -70,6 +91,31 @@ export default function ConversationSidebar({
       setDeleteDialogOpen(false);
       setConversationToDelete(null);
     }
+  };
+
+  const handleRenameClick = (e: React.MouseEvent, conv: Conversation) => {
+    e.stopPropagation();
+    setConversationToRename(conv.id);
+    setNewTitle(conv.title);
+    setRenameDialogOpen(true);
+    setOpenMenuId(null);
+  };
+
+  const handleConfirmRename = () => {
+    if (conversationToRename !== null && onRenameConversation && newTitle.trim()) {
+      onRenameConversation(conversationToRename, newTitle.trim());
+      setRenameDialogOpen(false);
+      setConversationToRename(null);
+      setNewTitle("");
+    }
+  };
+
+  const handlePinClick = (e: React.MouseEvent, conv: Conversation) => {
+    e.stopPropagation();
+    if (onPinConversation) {
+      onPinConversation(conv.id, !(conv as any).pinned);
+    }
+    setOpenMenuId(null);
   };
 
   if (collapsed) {
@@ -155,11 +201,18 @@ export default function ConversationSidebar({
                   )}
                   onClick={() => onSelectConversation(conv)}
                 >
+                  {/* 置顶图标 */}
+                  {(conv as any).pinned && (
+                    <Pin className="h-3 w-3 shrink-0 text-primary" />
+                  )}
+
                   {/* 图标 */}
-                  {conv.has_ppt ? (
-                    <FileSliders className="h-3.5 w-3.5 shrink-0" />
-                  ) : (
-                    <MessageSquare className="h-3.5 w-3.5 shrink-0" />
+                  {!(conv as any).pinned && (
+                    conv.has_ppt ? (
+                      <FileSliders className="h-3.5 w-3.5 shrink-0" />
+                    ) : (
+                      <MessageSquare className="h-3.5 w-3.5 shrink-0" />
+                    )
                   )}
 
                   {/* 运行中动画指示器 */}
@@ -175,13 +228,45 @@ export default function ConversationSidebar({
                     {conv.title}
                   </span>
 
-                  {/* 删除按钮 */}
-                  <button
-                    onClick={(e) => handleDeleteClick(e, conv.id)}
-                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-100 hover:text-red-600 transition-all"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
+                  {/* 三点菜单按钮 */}
+                  <Popover open={openMenuId === conv.id} onOpenChange={(open) => setOpenMenuId(open ? conv.id : null)}>
+                    <PopoverTrigger asChild>
+                      <button
+                        onClick={(e) => e.stopPropagation()}
+                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-gray-200 transition-all"
+                      >
+                        <MoreHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-36 p-1" align="end" side="right">
+                      <div className="flex flex-col">
+                        {/* 置顶/取消置顶 */}
+                        <button
+                          onClick={(e) => handlePinClick(e, conv)}
+                          className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-100 rounded-md transition-colors text-left"
+                        >
+                          <Pin className="h-4 w-4" />
+                          <span>{(conv as any).pinned ? "取消置顶" : "置顶对话"}</span>
+                        </button>
+                        {/* 重命名 */}
+                        <button
+                          onClick={(e) => handleRenameClick(e, conv)}
+                          className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-100 rounded-md transition-colors text-left"
+                        >
+                          <Pencil className="h-4 w-4" />
+                          <span>重命名</span>
+                        </button>
+                        {/* 删除 */}
+                        <button
+                          onClick={(e) => handleDeleteClick(e, conv.id)}
+                          className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-red-50 text-red-600 rounded-md transition-colors text-left"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          <span>删除</span>
+                        </button>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
                 </div>
               ))}
             </div>
@@ -210,7 +295,7 @@ export default function ConversationSidebar({
 
 
       {/* 删除确认弹窗 */}
-      < AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen} >
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>删除对话</AlertDialogTitle>
@@ -225,7 +310,40 @@ export default function ConversationSidebar({
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
-      </AlertDialog >
+      </AlertDialog>
+
+      {/* 重命名弹窗 */}
+      <AlertDialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>重命名对话</AlertDialogTitle>
+            <AlertDialogDescription>
+              请输入新的对话名称
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="py-4">
+            <input
+              type="text"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              className="w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
+              placeholder="请输入对话名称"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  handleConfirmRename();
+                }
+              }}
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmRename} disabled={!newTitle.trim()}>
+              确定
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

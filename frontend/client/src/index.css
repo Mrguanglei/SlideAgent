@@ -78,7 +78,7 @@
   --sidebar-accent-foreground: oklch(0.20 0.02 250);
   --sidebar-border: oklch(0.92 0.008 250);
   --sidebar-ring: oklch(0.55 0.16 250);
-  
+
   /* PPTAgent 专用颜色 */
   --success: oklch(0.65 0.18 145);
   --warning: oklch(0.75 0.15 85);
@@ -118,7 +118,7 @@
   --sidebar-accent-foreground: oklch(0.95 0.01 250);
   --sidebar-border: oklch(0.28 0.02 250);
   --sidebar-ring: oklch(0.65 0.14 250);
-  
+
   --success: oklch(0.70 0.14 145);
   --warning: oklch(0.78 0.12 85);
   --info: oklch(0.65 0.12 250);
@@ -128,10 +128,12 @@
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
+
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),
   a[href],
@@ -245,9 +247,10 @@
 
   /* 智谱清言风格工具按钮 - 胶囊形状 */
   .tool-button {
-    @apply flex items-center gap-2 px-4 py-2 rounded-full text-sm w-fit;
-    @apply bg-muted/60 hover:bg-muted transition-colors cursor-pointer;
-    @apply border border-transparent hover:border-border/50;
+    @apply flex items-center gap-2.5 px-4 py-2.5 rounded-lg text-sm w-fit;
+    @apply bg-gray-50 hover:bg-gray-100 transition-all cursor-pointer;
+    @apply border border-gray-200/80 hover:border-gray-300;
+    @apply shadow-sm hover:shadow;
   }
 
   .tool-button-icon {
@@ -255,7 +258,7 @@
   }
 
   .tool-button-text {
-    @apply font-medium text-foreground;
+    @apply font-medium text-foreground whitespace-nowrap;
   }
 
   .tool-button-query {
@@ -263,7 +266,7 @@
   }
 
   .tool-button-arrow {
-    @apply text-muted-foreground ml-auto;
+    @apply text-muted-foreground/60 ml-auto;
   }
 
   /* 输入框 */
@@ -344,9 +347,13 @@
 
   /* 打字动画 */
   @keyframes typing-dot {
-    0%, 60%, 100% {
+
+    0%,
+    60%,
+    100% {
       transform: translateY(0);
     }
+
     30% {
       transform: translateY(-4px);
     }
@@ -370,6 +377,7 @@
       transform: scale(0.8);
       opacity: 0.8;
     }
+
     100% {
       transform: scale(1.2);
       opacity: 0;
@@ -382,10 +390,14 @@
 
   /* 闪烁动画 */
   @keyframes blink {
-    0%, 50% {
+
+    0%,
+    50% {
       opacity: 1;
     }
-    51%, 100% {
+
+    51%,
+    100% {
       opacity: 0.3;
     }
   }

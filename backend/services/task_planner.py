@@ -176,8 +176,19 @@ async def generate_supplement_info_with_llm(topic: str) -> dict:
         ])
         
         # 解析 JSON
-        response = clean_json_response(response)
-        result = json.loads(response)
+        response = clean_json_response(response or "")
+        if not response.strip():
+            raise ValueError("Empty response from LLM")
+        try:
+            result = json.loads(response)
+        except json.JSONDecodeError:
+            # 容错：尝试从文本中提取 JSON
+            start = response.find("{")
+            end = response.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                result = json.loads(response[start:end + 1])
+            else:
+                raise
         
         # 添加页数选项
         result["numPagesQuestion"] = "您期望的PPT页数范围是？"
@@ -186,7 +197,7 @@ async def generate_supplement_info_with_llm(topic: str) -> dict:
         return result
         
     except Exception as e:
-        logger.error(f"Failed to generate supplement info with LLM: {e}")
+        logger.warning(f"Failed to generate supplement info with LLM: {e}")
         # 回退到基础选项
         return {
             "topic": topic,

@@ -29,7 +29,7 @@ import {
 
 // 组件导入
 import ConversationSidebar from "@/components/ConversationSidebar";
-import MessageItem from "@/components/MessageItem";
+import MessageItem, { AIAvatar, AI_AVATAR_OFFSET_X } from "@/components/MessageItem";
 import RightPanel from "@/components/RightPanel";
 import DownloadModal from "@/components/DownloadModal";
 import ShareModal from "@/components/ShareModal";
@@ -548,6 +548,43 @@ export default function Home() {
     } catch (error) {
       console.error("Failed to delete conversation:", error);
       toast.error("删除失败");
+    }
+  };
+
+  // 重命名对话
+  const handleRenameConversation = async (id: number, newTitle: string) => {
+    try {
+      await updateConversation(id, newTitle);
+      setConversations(prev =>
+        prev.map(c => (c.id === id ? { ...c, title: newTitle } : c))
+      );
+      toast.success("重命名成功");
+    } catch (error) {
+      console.error("Failed to rename conversation:", error);
+      toast.error("重命名失败");
+    }
+  };
+
+  // 置顶/取消置顶对话
+  const handlePinConversation = async (id: number, pinned: boolean) => {
+    try {
+      // 更新本地状态（置顶的对话排在前面）
+      setConversations(prev => {
+        const updated = prev.map(c =>
+          c.id === id ? { ...c, pinned } as Conversation : c
+        );
+        // 排序：置顶的在前面
+        return updated.sort((a, b) => {
+          const aPinned = (a as any).pinned ? 1 : 0;
+          const bPinned = (b as any).pinned ? 1 : 0;
+          if (aPinned !== bPinned) return bPinned - aPinned;
+          return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+        });
+      });
+      toast.success(pinned ? "已置顶" : "已取消置顶");
+    } catch (error) {
+      console.error("Failed to pin conversation:", error);
+      toast.error("操作失败");
     }
   };
 
@@ -1310,49 +1347,27 @@ export default function Home() {
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
         onDeleteConversation={handleDeleteConversation}
+        onRenameConversation={handleRenameConversation}
+        onPinConversation={handlePinConversation}
         onNewChat={handleNewChat}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
       />
 
-      {/* 中间区域 - 聊天 */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* 头部 - 只在聊天模式下显示 */}
-        {mode === "chat" && (
-          <header className="h-14 border-b border-border flex items-center justify-between px-4 bg-background shrink-0">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground truncate max-w-[400px]">
-                {currentTopic}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              {/* 深度思考模式开关 */}
-              <button
-                onClick={() => setDeepThinkingMode(!deepThinkingMode)}
-                className={cn(
-                  "p-2 rounded-lg transition-colors flex items-center gap-2",
-                  deepThinkingMode
-                    ? "bg-blue-500 text-white hover:bg-blue-600"
-                    : "hover:bg-muted text-muted-foreground"
-                )}
-                title={deepThinkingMode ? "关闭深度思考模式" : "开启深度思考模式"}
-              >
-                <Brain className="h-4 w-4" />
-                <span className="text-xs font-medium">
-                  {deepThinkingMode ? "深度思考" : "快速响应"}
-                </span>
-              </button>
 
-              {/* 文件按钮 - 始终显示 */}
-              <button
-                onClick={() => setShowTaskFilesModal(true)}
-                className="p-2 hover:bg-muted rounded-lg transition-colors"
-                title="任务文件"
-              >
-                <FolderOpen className="h-4 w-4 text-muted-foreground" />
-              </button>
-            </div>
-          </header>
+      {/* 中间区域 - 聊天 */}
+      <div className="flex-1 flex flex-col min-w-0 relative chat-surface">
+        {/* 右上角文件按钮 - 相对于中间区域定位 */}
+        {mode === "chat" && (
+          <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
+            <button
+              onClick={() => setShowTaskFilesModal(true)}
+              className="p-2 hover:bg-muted rounded-lg transition-colors bg-background/90 backdrop-blur-sm shadow-sm border border-border/50"
+              title="任务文件"
+            >
+              <FolderOpen className="h-4 w-4 text-muted-foreground" />
+            </button>
+          </div>
         )}
 
         {/* 主内容区 */}
@@ -1432,36 +1447,6 @@ export default function Home() {
                             </PopoverContent>
                           </Popover>
 
-                          {/* 深度思考模式开关 */}
-                          <button
-                            onClick={() => setDeepThinkingMode(!deepThinkingMode)}
-                            className={cn(
-                              "p-2 rounded-lg transition-colors flex items-center gap-1.5",
-                              deepThinkingMode
-                                ? "bg-blue-500 text-white hover:bg-blue-600"
-                                : "hover:bg-muted text-muted-foreground"
-                            )}
-                            title={deepThinkingMode ? "关闭深度思考模式" : "开启深度思考模式"}
-                          >
-                            <Brain className="h-4 w-4" />
-                            <span className="text-xs font-medium">
-                              {deepThinkingMode ? "深度模式" : "快速模式"}
-                            </span>
-                          </button>
-
-                          {/* PPT 模式标签 */}
-                          {isPptMode && (
-                            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 rounded-lg ml-2">
-                              <FileSliders className="h-4 w-4 text-primary" />
-                              <span className="text-sm text-primary font-medium">PPT模式</span>
-                              <button
-                                onClick={() => setIsPptMode(false)}
-                                className="ml-1 hover:bg-primary/20 rounded p-0.5"
-                              >
-                                <X className="h-3.5 w-3.5 text-primary" />
-                              </button>
-                            </div>
-                          )}
                         </div>
 
                         {/* 右侧发送按钮 */}
@@ -1543,9 +1528,11 @@ export default function Home() {
             </ScrollArea>
           ) : (
             // 聊天模式
-            <ScrollArea className="h-full chat-surface">
-              <div className="max-w-4xl mx-auto px-6 py-8">
-                {messages.map((message, index) => {
+            <div className="h-full flex flex-col">
+              <div className="h-[58px] shrink-0" />
+              <ScrollArea className="flex-1 chat-surface">
+                <div className="max-w-4xl mx-auto px-6 pt-0 pb-8">
+                  {messages.map((message, index) => {
                   const isFirstAiMessage =
                     message.role === "assistant" &&
                     (index === 0 || messages[index - 1]?.role !== "assistant");
@@ -1567,37 +1554,35 @@ export default function Home() {
                       onSetSearchRound={setCurrentSearchRound}
                       onScrollToSlide={handleScrollToSlide}
                       showThinking={deepThinkingMode}
+                      isLoading={isLoading}
                     />
                   );
                 })}
 
                 {isLoading && messages.length > 0 && messages[messages.length - 1]?.role === "user" && (() => {
-                  const isFirstAiResponse = messages.filter(m => m.role === "assistant").length === 0;
+                  const hasAssistant = messages.some(m => m.role === "assistant");
                   return (
                     <div className="mb-6">
-                      {isFirstAiResponse ? (
-                        // 首次 AI 响应：使用统一的气泡风格
-                        <div className="flex gap-3">
-                          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center shrink-0 mt-0.5 border border-primary/20 shadow-sm">
-                            <svg viewBox="0 0 24 24" className="w-5 h-5 text-primary" fill="currentColor">
-                              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
-                            </svg>
-                          </div>
-                          <div className="flex-1 min-w-0 space-y-2">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium text-foreground/80">SlideAgent</span>
-                              <span className="text-xs text-muted-foreground/60">正在思考</span>
+                      {!hasAssistant ? (
+                        // 首次 AI 过渡提示
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-1 -ml-2 min-h-12">
+                            <div className="w-12 h-12 flex items-center justify-center shrink-0">
+                              <AIAvatar isActive offsetX={AI_AVATAR_OFFSET_X} />
                             </div>
-                            <div className="assistant-bubble">
-                              <span className="text-sm text-muted-foreground">让我先核对下本轮任务的目标和重点偏好，正在梳理您的需求~</span>
-                              <span className="inline-flex items-center ml-2">
-                                <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                            <span className="text-base font-medium text-foreground leading-none">SlideAgent</span>
+                          </div>
+                          <div className="pl-8">
+                            <div className="text-base text-foreground leading-relaxed whitespace-pre-wrap">
+                              <span>让我先核对下本轮任务的目标和重点偏好，正在梳理您的需求~</span>
+                              <span className="inline-flex items-center ml-2 align-middle">
+                                <span className="w-2 h-2 rounded-full bg-primary animate-pulse align-middle" />
                               </span>
                             </div>
                           </div>
                         </div>
                       ) : (
-                        // 后续响应：使用新的加载动画
+                        // 后续响应：使用加载动画
                         <div className="flex items-center gap-2">
                           <span className="text-sm text-muted-foreground">正在生成中...</span>
                           <LoadingDots />
@@ -1617,22 +1602,23 @@ export default function Home() {
                   </div>
                 )}
 
-                <div ref={messagesEndRef} />
-              </div>
-            </ScrollArea>
+                  <div ref={messagesEndRef} />
+                </div>
+              </ScrollArea>
+            </div>
           )}
         </div>
 
-        {/* 输入框 - 只在聊天模式下显示 */}
+        {/* 输入框 - 只在聊天模式下显示 - 智谱清言风格 */}
         {mode === "chat" && (
-          <div className="p-4 border-t border-border bg-background shrink-0">
+          <div className="p-4 shrink-0">
             <div className="max-w-4xl mx-auto">
-              <div className="relative">
+              <div className="relative rounded-2xl border border-border bg-muted/50">
                 {/* 附件预览 */}
                 {activeAttachments.length > 0 && (
-                  <div className="flex flex-wrap gap-2 px-4 pb-2">
+                  <div className="flex flex-wrap gap-2 px-4 pt-3">
                     {activeAttachments.map(file => (
-                      <div key={file.id} className="flex items-center gap-1 bg-muted px-2 py-1 rounded-md text-sm border border-border">
+                      <div key={file.id} className="flex items-center gap-1 bg-background px-2 py-1 rounded-md text-sm border border-border">
                         <span className="truncate max-w-[150px]">{file.filename}</span>
                         <button
                           onClick={() => setActiveAttachments(prev => prev.filter(f => f.id !== file.id))}
@@ -1652,14 +1638,14 @@ export default function Home() {
                   onCompositionEnd={chatComposition.onCompositionEnd}
                   onKeyDown={chatComposition.onKeyDown}
                   placeholder="想调整内容、样式或风格等吗，直接告诉我吧"
-                  className="w-full px-4 py-3 pr-24 rounded-xl border border-border bg-background resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 min-h-[52px] max-h-[200px]"
+                  className="w-full px-4 py-4 pr-32 bg-transparent resize-none focus:outline-none min-h-[56px] max-h-[200px] text-sm"
                   rows={1}
                 />
 
-                <div className="absolute right-2 bottom-2 flex items-center gap-1">
+                <div className="absolute right-3 bottom-2 flex items-center gap-2">
                   <Popover open={chatPopoverOpen} onOpenChange={setChatPopoverOpen}>
                     <PopoverTrigger asChild>
-                      <button className="p-2 hover:bg-muted rounded-lg transition-colors">
+                      <button className="p-1.5 hover:bg-muted/80 rounded-lg transition-colors">
                         <Paperclip className="h-4 w-4 text-muted-foreground" />
                       </button>
                     </PopoverTrigger>
@@ -1683,21 +1669,8 @@ export default function Home() {
                     </PopoverContent>
                   </Popover>
 
-                  {/* PPT 模式标签 */}
-                  {isPptMode && (
-                    <div className="flex items-center gap-1 px-2 py-1 bg-primary/10 rounded-lg">
-                      <FileSliders className="h-3.5 w-3.5 text-primary" />
-                      <span className="text-xs text-primary font-medium">PPT模式</span>
-                      <button
-                        onClick={() => setIsPptMode(false)}
-                        className="ml-1 hover:bg-primary/20 rounded p-0.5"
-                      >
-                        <X className="h-3 w-3 text-primary" />
-                      </button>
-                    </div>
-                  )}
 
-                  {/* 发送或暂停按钮 */}
+                  {/* 发送或暂停按钮 - 圆形设计 */}
                   {isLoading ? (
                     <button
                       onClick={async () => {
@@ -1725,7 +1698,7 @@ export default function Home() {
                           }
                         }
                       }}
-                      className="p-2 rounded-lg transition-colors bg-orange-500 text-white hover:bg-orange-600"
+                      className="w-8 h-8 rounded-full flex items-center justify-center transition-colors bg-orange-500 text-white hover:bg-orange-600"
                       title="暂停任务"
                     >
                       <Pause className="h-4 w-4" />
@@ -1735,7 +1708,7 @@ export default function Home() {
                       onClick={handleSendMessage}
                       disabled={!inputValue.trim()}
                       className={cn(
-                        "p-2 rounded-lg transition-colors",
+                        "w-8 h-8 rounded-full flex items-center justify-center transition-colors",
                         inputValue.trim()
                           ? "bg-primary text-white hover:bg-primary/90"
                           : "bg-muted text-muted-foreground"

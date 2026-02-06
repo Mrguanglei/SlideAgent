@@ -466,11 +466,13 @@ export default function ToolCallCard({
             )}
             <button
               onClick={() => onOpenPanel("task_plan")}
-              className="tool-button"
+              className="tool-button group"
             >
-              <CalendarCheck className="tool-button-icon h-4 w-4" />
+              <div className="w-5 h-5 rounded-full bg-amber-50 flex items-center justify-center">
+                <CalendarCheck className="h-3 w-3 text-amber-500" />
+              </div>
               <span className="tool-button-text">任务执行规划</span>
-              <ChevronRight className="tool-button-arrow h-4 w-4" />
+              <ChevronRight className="tool-button-arrow h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
             </button>
           </div>
         );
@@ -507,12 +509,14 @@ export default function ToolCallCard({
                 onSetSearchRound(roundNum);
               }
             }}
-            className="tool-button"
+            className="tool-button group"
           >
-            <Search className="tool-button-icon h-4 w-4" />
+            <div className="w-5 h-5 rounded-full bg-blue-50 flex items-center justify-center">
+              <Search className="h-3 w-3 text-blue-500" />
+            </div>
             <span className="tool-button-text">搜索网页</span>
-            <span className="tool-button-query">{searchQuery}</span>
-            <ChevronRight className="tool-button-arrow h-4 w-4" />
+            <span className="text-muted-foreground text-sm truncate max-w-[200px]">{searchQuery}</span>
+            <ChevronRight className="tool-button-arrow h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
           </button>
         );
 
@@ -535,11 +539,13 @@ export default function ToolCallCard({
         return (
           <button
             onClick={() => onOpenPanel("ppt_outline")}
-            className="tool-button"
+            className="tool-button group"
           >
-            <FileSliders className="tool-button-icon h-4 w-4" />
+            <div className="w-5 h-5 rounded-full bg-green-50 flex items-center justify-center">
+              <FileSliders className="h-3 w-3 text-green-500" />
+            </div>
             <span className="tool-button-text">PPT 大纲目录</span>
-            <ChevronRight className="tool-button-arrow h-4 w-4" />
+            <ChevronRight className="tool-button-arrow h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
           </button>
         );
 
@@ -550,8 +556,10 @@ export default function ToolCallCard({
           topic?: string;
           pageNumber?: number;
         };
-        const slideTitle =
+        // 过滤掉 think 标签内容
+        const rawSlideTitle =
           slideData.description || slideData.title || slideData.topic || topic;
+        const slideTitle = rawSlideTitle.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/<think>[\s\S]*$/gi, '').trim();
         const slideIndex = (slideData.pageNumber || 1) - 1;
         return (
           <button
@@ -563,12 +571,14 @@ export default function ToolCallCard({
                 }, 100);
               }
             }}
-            className="tool-button"
+            className="tool-button group"
           >
-            <FileSliders className="tool-button-icon h-4 w-4" />
-            <span className="tool-button-text">生成幻灯片</span>
-            <span className="tool-button-query">{slideTitle}</span>
-            <ChevronRight className="tool-button-arrow h-4 w-4" />
+            <div className="w-5 h-5 rounded-full bg-purple-50 flex items-center justify-center">
+              <FileSliders className="h-3 w-3 text-purple-500" />
+            </div>
+            <span className="tool-button-text">新增页面</span>
+            <span className="text-muted-foreground text-sm truncate max-w-[300px]">{slideTitle}</span>
+            <ChevronRight className="tool-button-arrow h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
           </button>
         );
 

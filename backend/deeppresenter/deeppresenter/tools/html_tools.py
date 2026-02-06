@@ -157,15 +157,15 @@ def think(thought_content: str) -> str:
     #### 页面尺寸规范（严格遵守）
     - **所有页面**：width: 1280px; height: 720px; （固定高度，不要用min-height）
     - **重要**：所有内容必须严格控制在720px高度内，避免溢出
-    - **重要**：使用 flex 布局确保内容填充页面高度
+    - **重要**：采用物理分区：Header 80px + Content 600px + Bottom 40px，禁止通过 min-height/flex-grow 撑高页面
     - **页面边距要求**：
-      - 标题栏 padding-top: 至少 30-40px（避免紧贴顶部）
+      - 标题栏 padding-top: 建议 24-32px（避免紧贴顶部）
       - 内容区域 padding-bottom: 至少 40px（避免底部被遮盖）
       - 左右边距: 至少 50-60px
 
     #### 布局技术选择
-    - **主容器**：使用 display: flex; flex-direction: column;
-    - **内容区**：使用 flex-grow: 1; 填充剩余空间
+    - **主容器**：可使用 display: flex; flex-direction: column; 或绝对定位，但必须固定高度为 720px
+    - **内容区**：固定 height: 600px 或使用 top:80px; bottom:40px 的物理分区锁定
     - **对齐方式**：使用 flexbox 的 justify-content 和 align-items
     - **避免**：过度使用嵌套的 div 和复杂的网格系统
 
@@ -183,15 +183,15 @@ def think(thought_content: str) -> str:
     #### 字体大小规范
     - **封面标题**：64-84px, font-weight: 800-900
     - **封面副标题**：22-28px, font-weight: 300-400
-    - **页面标题**：36-40px（标题栏高度100-120px，含padding）
+    - **页面标题**：34-40px（标题栏高度80px，含padding）
     - **主要文本**：20-24px
     - **最小文本**：18px
     
     #### 标题栏布局规范（重要）
-    - **标题栏总高度**：100-120px（包含上下padding）
-    - **标题栏padding**：padding: 35px 60px 25px 60px（上 右 下 左）
-    - **避免标题紧贴顶部**：必须有 padding-top: 30-40px
-    - **内容区域可用高度**：720px - 标题栏(100-120px) - 底部padding(40px) ≈ 560-580px
+    - **标题栏总高度**：80px（包含上下padding）
+    - **标题栏padding**：padding: 24px 60px 16px 60px（上 右 下 左）
+    - **避免标题紧贴顶部**：必须有 padding-top: 24-32px
+    - **内容区域可用高度**：720px - 标题栏(80px) - 底部padding(40px) = 600px
 
     #### 必须引入的资源
     - Material Icons: <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
@@ -199,14 +199,14 @@ def think(thought_content: str) -> str:
     - Chart.js（如需图表）: <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     #### 封面页技术要点
-    - 使用 height: 100vh 或 height: 720px 确保固定高度
+    - 使用 height: 720px 确保固定高度
     - 使用 display: flex; justify-content: center; align-items: center; 实现居中
     - 背景使用 linear-gradient 或 background-image + 半透明遮罩
     - 装饰元素使用 position: absolute 定位
 
     #### 内容页技术要点
-    - **标题栏**：高度100-120px，padding: 35px 60px 25px 60px
-    - **主内容区**：padding: 30px 60px 40px 60px，使用 flex 或 grid 布局
+    - **标题栏**：高度80px，padding: 24px 60px 16px 60px
+    - **主内容区**：height: 600px; padding: 20px 60px 40px 60px; box-sizing: border-box
     - **严格限制内容数量**：每页最多4-6个主要元素，避免溢出
     - **卡片/模块**：
       - 阴影: box-shadow: 0 4px 6px rgba(0,0,0,0.07), 0 10px 20px rgba(0,0,0,0.1)
@@ -383,7 +383,7 @@ def insert_page(
     ⚠️ **重要**：
     - 所有页面必须使用 height: 720px（固定高度）
     - 不要使用 min-height: 720px
-    - 确保标题栏有 padding-top: 30-40px
+    - 确保标题栏有 padding-top: 24-32px
     - 确保内容区域有 padding-bottom: 40px
     - 严格控制内容数量，每页最多4-6个主要元素
     

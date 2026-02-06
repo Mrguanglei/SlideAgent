@@ -39,12 +39,9 @@ async function startServer() {
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
 
-  // 代理到 Python 后端的 /api/chat 接口 (SSE)
-  app.post("/api/ppt/chat", async (req, res) => {
+  const proxySSE = async (req: express.Request, res: express.Response, backendPath: string) => {
     try {
-      console.log("[Proxy] Forwarding chat request to Python backend");
-      console.log("[Proxy] Request body:", JSON.stringify(req.body, null, 2));
-      const response = await fetch(`${BACKEND_URL}/api/chat`, {
+      const response = await fetch(`${BACKEND_URL}${backendPath}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -56,12 +53,19 @@ async function startServer() {
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
 
-      // 转发 session_id
+      // 转发 session_id / conversation_id（必须在 flushHeaders 前设置）
       const sessionId = response.headers.get("X-Session-Id");
       if (sessionId) {
         res.setHeader("X-Session-Id", sessionId);
       }
+      const conversationId = response.headers.get("X-Conversation-Id");
+      if (conversationId) {
+        res.setHeader("X-Conversation-Id", conversationId);
+      }
+
+      res.flushHeaders?.();
 
       // 流式转发响应
       if (response.body) {
@@ -72,66 +76,44 @@ async function startServer() {
           const { done, value } = await reader.read();
           if (done) break;
           const chunk = decoder.decode(value, { stream: true });
-
-          // 记录接收到的数据块
-          const lines = chunk.split('\n');
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (data.type === 'tool_call') {
-                  console.log("[Proxy] Received tool_call:", JSON.stringify(data, null, 2));
-                }
-              } catch (e) {
-                // 忽略解析错误
-              }
-            }
-          }
-
           res.write(chunk);
         }
       }
       res.end();
     } catch (error) {
-      console.error("[Proxy] Chat error:", error);
-      res.status(500).json({ error: "Failed to connect to backend" });
+      console.error("[Proxy] SSE error:", error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Failed to connect to backend" });
+      } else {
+        res.end();
+      }
     }
+  };
+
+  // 代理到 Python 后端的 /api/chat 接口 (SSE)
+  app.post("/api/ppt/chat", async (req, res) => {
+    console.log("[Proxy] Forwarding chat request to Python backend");
+    console.log("[Proxy] Request body:", JSON.stringify(req.body, null, 2));
+    await proxySSE(req, res, "/api/chat");
+  });
+
+  // 代理到 Python 后端的 /api/chat 接口 (SSE) - 兼容前端直连 /api/chat
+  app.post("/api/chat", async (req, res) => {
+    console.log("[Proxy] Forwarding chat request to Python backend");
+    console.log("[Proxy] Request body:", JSON.stringify(req.body, null, 2));
+    await proxySSE(req, res, "/api/chat");
   });
 
   // 代理到 Python 后端的 /api/confirm 接口 (SSE)
   app.post("/api/ppt/confirm", async (req, res) => {
-    try {
-      console.log("[Proxy] Forwarding confirm request to Python backend");
-      const response = await fetch(`${BACKEND_URL}/api/confirm`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(req.body),
-      });
+    console.log("[Proxy] Forwarding confirm request to Python backend");
+    await proxySSE(req, res, "/api/confirm");
+  });
 
-      // 设置 SSE 响应头
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
-
-      // 流式转发响应
-      if (response.body) {
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          res.write(chunk);
-        }
-      }
-      res.end();
-    } catch (error) {
-      console.error("[Proxy] Confirm error:", error);
-      res.status(500).json({ error: "Failed to connect to backend" });
-    }
+  // 代理到 Python 后端的 /api/confirm 接口 (SSE) - 兼容直连
+  app.post("/api/confirm", async (req, res) => {
+    console.log("[Proxy] Forwarding confirm request to Python backend");
+    await proxySSE(req, res, "/api/confirm");
   });
 
   // 代理到 Python 后端的 /api/health 接口

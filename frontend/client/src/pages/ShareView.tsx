@@ -351,9 +351,11 @@ export default function ShareView() {
       <div className="flex-1 flex overflow-hidden">
         {/* 中间聊天区域 */}
         <div className="flex-1 flex flex-col">
+          {/* 顶部占位栏 */}
+          <div className="h-[58px] shrink-0" />
           {/* 消息列表 */}
           <ScrollArea className="flex-1 chat-surface">
-            <div className="max-w-4xl mx-auto px-6 py-8">
+            <div className="max-w-4xl mx-auto px-6 pt-0 pb-8">
               {messages.map((message, index) => {
                 // 判断是否是第一条 AI 消息
                 const isFirstAiMessage =

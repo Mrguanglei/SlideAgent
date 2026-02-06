@@ -6,6 +6,7 @@ PPTAgent LLM 服务模块
 
 import json
 import logging
+import asyncio
 from typing import AsyncGenerator, Optional
 
 import httpx
@@ -14,6 +15,40 @@ from fastapi import HTTPException
 from utils.config import Config
 
 logger = logging.getLogger(__name__)
+
+def _extract_chunk_text(chunk: dict) -> Optional[str]:
+    """兼容多种 OpenAI 流式/非流式返回格式，提取文本内容"""
+    if not isinstance(chunk, dict):
+        return None
+    choices = chunk.get("choices") or []
+    if choices:
+        choice = choices[0] or {}
+        # 标准 chat.completions 流式格式
+        delta = choice.get("delta") or {}
+        if isinstance(delta, dict):
+            content = delta.get("content")
+            if content:
+                return content
+        # 非流式 chat.completions
+        message = choice.get("message") or {}
+        if isinstance(message, dict):
+            content = message.get("content")
+            if content:
+                return content
+        # 兼容 completions
+        text = choice.get("text")
+        if text:
+            return text
+    # 兜底
+    content = chunk.get("content")
+    if isinstance(content, str) and content:
+        return content
+    return None
+
+
+def _iter_text_chunks(text: str, size: int = 32):
+    for idx in range(0, len(text), size):
+        yield text[idx:idx + size]
 
 
 async def call_llm_api(messages: list, response_format: dict = None, deep_thinking_mode: bool = False) -> str:
@@ -96,17 +131,48 @@ async def call_llm_api_stream(messages: list, deep_thinking_mode: bool = False) 
             json=payload
         ) as response:
             response.raise_for_status()
+            content_type = response.headers.get("content-type", "")
+            # 如果服务端不返回 SSE，则改为一次性读取并“伪流式”输出
+            if "text/event-stream" not in content_type.lower():
+                try:
+                    data = await response.json()
+                except Exception:
+                    raw = await response.aread()
+                    try:
+                        data = json.loads(raw.decode("utf-8", errors="ignore"))
+                    except json.JSONDecodeError:
+                        return
+                content = _extract_chunk_text(data) or ""
+                for piece in _iter_text_chunks(content):
+                    yield piece
+                    await asyncio.sleep(0.01)
+                return
             async for line in response.aiter_lines():
+                if not line:
+                    continue
                 if line.startswith("data: "):
                     data = line[6:]
                     if data == "[DONE]":
                         break
                     try:
                         chunk = json.loads(data)
-                        if chunk.get("choices") and chunk["choices"][0].get("delta", {}).get("content"):
-                            yield chunk["choices"][0]["delta"]["content"]
                     except json.JSONDecodeError:
                         continue
+                    content = _extract_chunk_text(chunk)
+                    if content:
+                        for piece in _iter_text_chunks(content):
+                            yield piece
+                    continue
+                # 兼容某些服务直接返回 JSON 行
+                if line.startswith("{"):
+                    try:
+                        chunk = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    content = _extract_chunk_text(chunk)
+                    if content:
+                        for piece in _iter_text_chunks(content):
+                            yield piece
 
 
 

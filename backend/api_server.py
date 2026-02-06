@@ -342,20 +342,40 @@ async def stream_ppt_generation(
         if not is_ppt_request:
             # 非 PPT 请求，直接对话
             response_text = ""
+            # 对非 PPT 请求做轻量“平滑流式”，避免模型一次性返回导致前端看起来不流式
+            stream_chunk_size = 12
+            stream_chunk_delay = 0.01
             async for chunk in call_llm_api_stream([
                 {"role": "system", "content": "你是 SlideAgent，一个专业的 PPT 制作助手。用户似乎没有明确的 PPT 制作需求，请友好地回应并引导用户。"},
                 {"role": "user", "content": instruction}
             ]):
                 response_text += chunk
-                # 构建消息数据
-                message_data = {
-                    'type': 'message',
-                    'content': chunk,
-                    'role': 'assistant',
-                    'streaming': True,
-                    'created_at': datetime.now().isoformat()
-                }
-                yield f"data: {json.dumps(message_data, ensure_ascii=False)}\n\n"
+                if not chunk:
+                    continue
+                # 构建消息数据（必要时切分大块输出）
+                if len(chunk) <= stream_chunk_size:
+                    message_data = {
+                        'type': 'message',
+                        'content': chunk,
+                        'role': 'assistant',
+                        'streaming': True,
+                        'created_at': datetime.now().isoformat()
+                    }
+                    yield f"data: {json.dumps(message_data, ensure_ascii=False)}\n\n"
+                else:
+                    for idx in range(0, len(chunk), stream_chunk_size):
+                        piece = chunk[idx:idx + stream_chunk_size]
+                        message_data = {
+                            'type': 'message',
+                            'content': piece,
+                            'role': 'assistant',
+                            'streaming': True,
+                            'created_at': datetime.now().isoformat()
+                        }
+                        yield f"data: {json.dumps(message_data, ensure_ascii=False)}\n\n"
+                        # 小延迟让前端渲染出“流式”效果
+                        if idx + stream_chunk_size < len(chunk):
+                            await asyncio.sleep(stream_chunk_delay)
             
             # 保存助手消息
             if db and conversation_id:
@@ -1060,6 +1080,7 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
             "X-Session-Id": session_id,
             "X-Conversation-Id": str(conversation_id) if conversation_id else "",
         }
@@ -1168,6 +1189,7 @@ async def confirm(request: ConfirmRequest, db: AsyncSession = Depends(get_db)):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
         }
     )
 

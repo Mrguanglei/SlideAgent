@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
-import { User, Bot, Loader2 } from "lucide-react";
+import { User, Loader2 } from "lucide-react";
+import Lottie, { LottieRefCurrentProps } from "lottie-react";
+import planetAnimationRaw from "@/assets/planet.json?raw";
 import ToolCallCard from "./ToolCallCard";
 import ThinkingBlock from "./ThinkingBlock";
 import type { Message, RightPanelType } from "@/types";
@@ -17,6 +19,8 @@ interface ThinkParseResult {
   normalContent: string;
   hasPending: boolean;
 }
+
+const planetAnimationData = JSON.parse(planetAnimationRaw) as object;
 
 function parseThinkTags(content: string): ThinkParseResult {
   // 1. 提取完整的 <think>...</think> 块 (大小写不敏感)
@@ -49,10 +53,60 @@ function parseThinkTags(content: string): ThinkParseResult {
   return { thinkBlocks, normalContent: normalContent.trim(), hasPending };
 }
 
-// 智谱风格 AI 头像
-const AIAvatar = () => (
-  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5 border border-primary/20 shadow-sm">
-    <Bot className="w-5 h-5 text-primary" />
+// AI 头像组件 - 使用 Lottie 动画
+export const AI_AVATAR_OFFSET_X = -0.5;
+
+interface AIAvatarProps {
+  isActive?: boolean; // 是否正在活动（循环播放动画）
+  offsetX?: number; // 头像水平偏移（px）
+}
+
+export const AIAvatar = ({ isActive = false, offsetX = AI_AVATAR_OFFSET_X }: AIAvatarProps) => {
+  const lottieRef = useRef<LottieRefCurrentProps>(null);
+  // 根据 isActive 控制播放/暂停
+  useEffect(() => {
+    if (lottieRef.current) {
+      if (isActive) {
+        lottieRef.current.play();
+      } else {
+        // 停在最后一帧显示静态效果
+        const totalFrames = lottieRef.current.getDuration(true);
+        if (totalFrames) {
+          lottieRef.current.goToAndStop(totalFrames - 1, true);
+        }
+      }
+    }
+  }, [isActive]);
+
+  return (
+    <div
+      className="w-12 h-12 flex items-center justify-center flex-shrink-0"
+      style={{ filter: 'saturate(1.4) contrast(1.1)' }}
+    >
+      <Lottie
+        lottieRef={lottieRef}
+        animationData={planetAnimationData}
+        loop={isActive}
+        autoplay={true}
+        style={{ width: 48, height: 48, transform: `translateX(${offsetX}px)` }}
+        onComplete={() => {
+          // 动画播放完成后，如果不是活动状态，停在最后一帧
+          if (!isActive && lottieRef.current) {
+            const totalFrames = lottieRef.current.getDuration(true);
+            if (totalFrames) {
+              lottieRef.current.goToAndStop(totalFrames - 1, true);
+            }
+          }
+        }}
+      />
+    </div>
+  );
+};
+
+// 用户头像
+const UserAvatar = () => (
+  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-500 flex items-center justify-center flex-shrink-0 shadow-sm">
+    <User className="w-4 h-4 text-white" />
   </div>
 );
 
@@ -70,6 +124,7 @@ interface MessageItemProps {
   onScrollToSlide?: (slideIndex: number) => void;
   isShareMode?: boolean; // 分享模式
   showThinking?: boolean; // 是否展示思考内容
+  isLoading?: boolean; // AI 是否正在处理任务
 }
 
 export default function MessageItem({
@@ -85,32 +140,44 @@ export default function MessageItem({
   onScrollToSlide,
   isShareMode = false,
   showThinking = true,
+  isLoading = false,
 }: MessageItemProps) {
   const isUser = message.role === "user";
 
   return (
-    <div className={cn("mb-8", isUser && "flex justify-end")}>
+    <div className={cn("mb-6", isUser && "")}>
       {isUser ? (
-        /* 用户消息 - 右对齐 */
-        <div className="flex items-start gap-3 flex-row-reverse">
-          {isFirstUserMessage ? (
-            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shrink-0 shadow-sm mt-0.5 ring-1 ring-primary/20">
-              <User className="h-4 w-4 text-primary-foreground" />
+        /* 用户消息 - 左对齐，类似智谱清言风格 */
+        <div className="space-y-1.5">
+          {/* 用户头像和名称 - 同一行居中对齐，往左突出 */}
+          {isFirstUserMessage && (
+            <div className="flex items-center gap-2 -ml-2 min-h-12">
+              <div className="w-12 h-12 flex items-center justify-center shrink-0">
+                <UserAvatar />
+              </div>
+              <span className="text-base font-medium text-foreground leading-none">用户</span>
             </div>
-          ) : (
-            <div className="w-9 h-9 shrink-0 mt-0.5" aria-hidden />
           )}
-          <div className="user-bubble max-w-[85%]">
-            <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
+          {/* 用户消息内容 - 与名称对齐 */}
+          <div className="pl-8">
+            <p className="leading-relaxed whitespace-pre-wrap text-foreground">{message.content}</p>
           </div>
         </div>
       ) : (
         /* AI 消息 - 左对齐，智谱风格 */
-        <div className="flex gap-3">
-          {/* AI 头像 */}
-          {isFirstAiMessage ? <AIAvatar /> : <div className="w-9 h-9 shrink-0 mt-0.5" aria-hidden />}
+        <div className="space-y-1.5">
+          {/* AI 头像和名称 - 只在首条 AI 消息显示 */}
+          {isFirstAiMessage && (
+            <div className="flex items-center gap-1 -ml-2 min-h-12">
+              <div className="w-12 h-12 flex items-center justify-center shrink-0">
+                <AIAvatar isActive={isLoading} />
+              </div>
+              <span className="text-base font-medium text-foreground leading-none">SlideAgent</span>
+            </div>
+          )}
 
-          <div className="flex-1 space-y-3 min-w-0">
+          {/* AI 消息内容 - 与名称对齐 */}
+          <div className="pl-8">
             {/* 这里的 IIFE 用于处理 content 解析逻辑 */}
             {(() => {
               // 解析消息中的 think 标签
@@ -118,15 +185,6 @@ export default function MessageItem({
 
               return (
                 <div className="space-y-3">
-                  {/* AI 名称 - 只在第一条 AI 消息显示 */}
-                  {isFirstAiMessage && (
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-sm font-medium text-foreground/80">SlideAgent</span>
-                      <span className="text-xs text-muted-foreground/60">
-                        {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    </div>
-                  )}
 
                   {/* 思考中占位 - 不直接显示思考内容 */}
                   {showThinking && hasPending && (
@@ -152,19 +210,17 @@ export default function MessageItem({
 
                   {/* AI 普通文字内容 */}
                   {(!message.isDeepThinking && normalContent) && (
-                    <div className="assistant-bubble">
-                      <div className="prose prose-sm dark:prose-invert max-w-none text-foreground leading-normal break-words">
-                        <div className="whitespace-pre-wrap">{normalContent}</div>
-                        {message.streaming && (
-                          <span className="inline-block w-1.5 h-4 ml-1 bg-primary animate-pulse align-middle" />
-                        )}
-                      </div>
+                    <div className="prose prose-sm dark:prose-invert max-w-none text-foreground leading-relaxed break-words">
+                      <div className="whitespace-pre-wrap">{normalContent}</div>
+                      {message.streaming && (
+                        <span className="inline-block w-1.5 h-4 ml-1 bg-primary animate-pulse align-middle" />
+                      )}
                     </div>
                   )}
 
                   {/* 仅有思维链且正在流式输出时显示光标 */}
                   {!message.isDeepThinking && !normalContent && message.streaming && thinkBlocks.length === 0 && (
-                    <div className="assistant-bubble inline-flex items-center">
+                    <div className="inline-flex items-center">
                       <span className="inline-block w-1.5 h-4 ml-1 bg-primary animate-pulse align-middle" />
                     </div>
                   )}
