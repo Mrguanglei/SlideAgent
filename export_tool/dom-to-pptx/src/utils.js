@@ -363,7 +363,7 @@ export function parseColor(str) {
 
   // 2. Handle RGB/RGBA Output (standard) - Fast Path
   if (computed.startsWith('rgb')) {
-    const match = computed.match(/[\d.]+/g);
+    const match = computed.match(/(\d+(?:\.\d+)?)/g);
     if (match && match.length >= 3) {
       const r = parseInt(match[0]);
       const g = parseInt(match[1]);
@@ -406,6 +406,57 @@ export function getSoftEdges(filterStr, scale) {
   const match = filterStr.match(/blur\(([\d.]+)px\)/);
   if (match) return parseFloat(match[1]) * 0.75 * scale;
   return null;
+}
+
+/**
+ * Resolve CSS font-family to the actually-rendered font name for PPTX.
+ *
+ * Walks the comma-separated font stack and uses canvas measurement to
+ * determine which font is actually making a difference. For each candidate,
+ * it compares rendering WITH that font vs WITHOUT it (the rest of the stack).
+ * If removing it changes nothing, the font is not installed → skip it.
+ */
+const _genericFontMap = {
+  'serif': 'Times New Roman',
+  'sans-serif': 'Arial',
+  'monospace': 'Courier New',
+  'cursive': 'Comic Sans MS',
+  'fantasy': 'Impact',
+  'system-ui': 'Arial',
+  'ui-monospace': 'Courier New',
+};
+
+function resolveFontFace(fontFamily) {
+  const parts = fontFamily.split(',').map(f => f.trim().replace(/['"]/g, ''));
+  if (parts.length <= 1) return parts[0] || 'Arial';
+
+  try {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const testStr = 'mmmmmmmmmmlli1|WwQq';
+
+    for (let i = 0; i < parts.length; i++) {
+      const face = parts[i].toLowerCase();
+      if (_genericFontMap[face]) return _genericFontMap[face];
+
+      // Build CSS font value: with this font vs without
+      const withFont = parts.slice(i).map(f => `"${f}"`).join(', ');
+      const withoutFont = parts.slice(i + 1).map(f => `"${f}"`).join(', ') || '"serif"';
+
+      ctx.font = `72px ${withFont}`;
+      const wWith = ctx.measureText(testStr).width;
+      ctx.font = `72px ${withoutFont}`;
+      const wWithout = ctx.measureText(testStr).width;
+
+      if (Math.abs(wWith - wWithout) > 0.5) {
+        // This font IS loaded and affecting rendering
+        return parts[i];
+      }
+      // Font not loaded — skip to next in stack
+    }
+  } catch (_) { /* fall through */ }
+
+  return parts[0] || 'Arial';
 }
 
 export function getTextStyle(style, scale) {
@@ -451,7 +502,7 @@ export function getTextStyle(style, scale) {
 
   return {
     color: colorObj.hex || '000000',
-    fontFace: style.fontFamily.split(',')[0].replace(/['"]/g, ''),
+    fontFace: resolveFontFace(style.fontFamily),
     fontSize: Math.floor(fontSizePx * 0.75 * scale),
     bold: parseInt(style.fontWeight) >= 600,
     italic: style.fontStyle === 'italic',
@@ -764,7 +815,7 @@ export function generateGradientSVG(w, h, bgString, radius, border) {
       // Handle RGBA/RGB for SVG compatibility
       let opacity = 1;
       if (color.includes('rgba')) {
-        const rgbaMatch = color.match(/[\d.]+/g);
+        const rgbaMatch = color.match(/(\d+(?:\.\d+)?)/g);
         if (rgbaMatch && rgbaMatch.length >= 4) {
           opacity = rgbaMatch[3];
           color = `rgb(${rgbaMatch[0]},${rgbaMatch[1]},${rgbaMatch[2]})`;

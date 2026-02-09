@@ -1224,6 +1224,7 @@ function prepareRenderItem(
   if (isText) {
     const textParts = [];
     let trimNextLeading = false;
+    let softBreakNext = false;
 
     if (pseudoBefore) {
       const pseudoStyle = window.getComputedStyle(node, '::before');
@@ -1234,9 +1235,15 @@ function prepareRenderItem(
     }
 
     node.childNodes.forEach((child, index) => {
-      // Handle <br> tags
+      // Skip icon elements — they are rendered separately as images
+      if (child.nodeType === 1 && isIconElement(child)) {
+        return;
+      }
+
+      // Handle <br> tags — use soft break (shift+enter) to stay within
+      // the same paragraph and preserve line-height spacing.
       if (child.tagName === 'BR') {
-        // 1. Trim trailing space from the *previous* text part to prevent double wrapping
+        // Trim trailing space from the *previous* text part to prevent double wrapping
         if (textParts.length > 0) {
           const lastPart = textParts[textParts.length - 1];
           if (lastPart.text && typeof lastPart.text === 'string') {
@@ -1244,9 +1251,8 @@ function prepareRenderItem(
           }
         }
 
-        textParts.push({ text: '', options: { breakLine: true } });
-
-        // 2. Signal to trim leading space from the *next* text part
+        // Signal the *next* text part to use a soft break before it
+        softBreakNext = true;
         trimNextLeading = true;
         return;
       }
@@ -1268,6 +1274,12 @@ function prepareRenderItem(
 
       if (textVal.length > 0) {
         const textOpts = getTextStyle(nodeStyle, config.scale);
+
+        // Apply pending soft break from a preceding <br>
+        if (softBreakNext) {
+          textOpts.softBreakBefore = true;
+          softBreakNext = false;
+        }
 
         // BUG FIX: Numbers 1 and 2 having background.
         // If this is a naked Text Node (nodeType 3), it inherits style from the parent container.
@@ -1295,6 +1307,12 @@ function prepareRenderItem(
       if (align === 'end') align = 'right';
       let valign = 'top';
       if (style.alignItems === 'center') valign = 'middle';
+      // Inherit vertical centering from parent flex container
+      const parentEl = node.parentElement;
+      if (parentEl) {
+        const parentStyle = window.getComputedStyle(parentEl);
+        if (parentStyle.display.includes('flex') && parentStyle.alignItems === 'center') valign = 'middle';
+      }
       if (style.justifyContent === 'center' && style.display.includes('flex')) align = 'center';
 
       const pt = parseFloat(style.paddingTop) || 0;
@@ -1468,7 +1486,6 @@ function prepareRenderItem(
         shapeType = pptx.ShapeType.roundRect;
         let r = radiusPx / minDimension;
         if (r > 0.5) r = 0.5;
-        if (minDimension < 100) r = r * 0.25; // Small size adjustment for small shapes
 
         shapeOpts.rectRadius = r;
       }
