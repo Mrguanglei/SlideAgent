@@ -136,8 +136,12 @@ export default function ConversationSidebar({
         {/* 顶部 Logo + 折叠按钮 */}
         <div className="h-14 flex items-center justify-between px-3 shrink-0">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 bg-primary rounded-lg flex items-center justify-center">
-              <FileSliders className="h-3.5 w-3.5 text-white" />
+            <div className="w-7 h-7 rounded-lg overflow-hidden bg-primary/10 flex items-center justify-center">
+              <img
+                src="/logo.png"
+                alt="Logo"
+                className="w-full h-full object-cover"
+              />
             </div>
             <span className="font-bold text-sm">SlideAgent</span>
           </div>

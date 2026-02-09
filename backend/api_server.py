@@ -16,6 +16,7 @@ import uuid
 import logging
 import asyncio
 import tempfile
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -37,6 +38,47 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+def normalize_conversation_title(text: str, max_len: int = 32) -> str:
+    """清洗/截断标题"""
+    if not text:
+        return "新对话"
+    # 移除可能泄露的思考标签
+    title = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE)
+    title = re.sub(r"<think>[\s\S]*$", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"\s+", " ", title).strip()
+    title = title.strip("“”\"'`")
+    title = title.lstrip("：:，,。. ")
+    if len(title) > max_len:
+        title = title[:max_len].rstrip()
+    return title if title else "新对话"
+
+
+async def generate_conversation_title_llm(text: str, max_len: int = 32) -> str:
+    """用模型生成简短主题标题，失败时回退规则提取"""
+    if not text:
+        return "新对话"
+    prompt = f"""请根据用户输入生成一个简短、明确的PPT主题标题。
+- 只输出标题，不要解释
+- 不要包含“PPT/演示文稿/幻灯片/帮我/请”等指令词
+- 尽量≤{max_len}个字
+用户输入：{text[:200]}
+"""
+    try:
+        response = await call_llm_api([
+            {"role": "system", "content": "你是标题提炼助手，只输出标题。"},
+            {"role": "user", "content": prompt},
+        ])
+        if response:
+            title = normalize_conversation_title(response, max_len=max_len)
+            if title:
+                return title
+    except Exception as e:
+        logger.warning(f"Failed to generate title with LLM: {e}")
+
+    fallback = extract_core_topic(text)
+    return normalize_conversation_title(fallback, max_len=max_len)
+
 # 导入配置
 from utils.config import Config
 
@@ -51,7 +93,7 @@ from routers import conversations_router, ppt_router, export_router, knowledge_r
 from services.knowledge.document_parser import DocumentParser
 
 # 导入服务
-from services.llm import call_llm_api, call_llm_api_stream
+from services.llm import call_llm_api, call_llm_api_stream, extract_core_topic
 from services.search import (
     generate_search_queries,
     execute_search,
@@ -433,6 +475,7 @@ async def stream_ppt_generation(
 
         # 生成补充信息选项
         supplement_info = await generate_supplement_info_with_llm(instruction)
+        generated_topic = supplement_info.get("topic") if isinstance(supplement_info, dict) else None
 
         # 发送补充信息工具调用事件
         tool_call_data = {
@@ -447,6 +490,10 @@ async def stream_ppt_generation(
         # 保存到数据库
         if db and conversation_id:
             try:
+                if generated_topic:
+                    await crud.update_conversation_title(
+                        db, conversation_id, normalize_conversation_title(generated_topic)
+                    )
                 msg = await crud.create_message(db, conversation_id, "assistant", "让我先核对下本轮任务的目标和重点偏好，正在梳理您的需求~")
                 await crud.create_tool_call(
                     db, msg.id, "supplement_info", "补充信息", "pending",
@@ -1104,8 +1151,9 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
     # 如果没有 conversation_id，创建新对话
     if not conversation_id:
         try:
+            conversation_title = await generate_conversation_title_llm(request.instruction)
             conversation = await crud.create_conversation(
-                db, title=request.instruction[:50], user_id="default_user"
+                db, title=conversation_title, user_id="default_user"
             )
             conversation_id = conversation.id
             conversation_uuid = conversation.uuid
@@ -1194,7 +1242,7 @@ async def confirm(request: ConfirmRequest, db: AsyncSession = Depends(get_db)):
         # 更新对话标题
         if conversation_id:
             try:
-                await crud.update_conversation_title(db, conversation_id, generated_topic)
+                await crud.update_conversation_title(db, conversation_id, normalize_conversation_title(generated_topic))
                 await db.commit()
                 logger.info(f"Updated conversation title to: {generated_topic}")
             except Exception as e:

@@ -11,7 +11,7 @@ import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import AsyncGenerator, Optional, Dict, List
+from typing import AsyncGenerator, Optional, Dict, List, Tuple
 
 from utils.config import Config
 from services.llm import call_llm_api
@@ -100,6 +100,65 @@ _BACKGROUND_EXCLUDE_KEYWORDS = [
     "screenshot", "dashboard", "ui", "icon", "logo", "banner",
     "图表", "表格", "示意", "流程图", "架构", "数据", "截图", "界面", "仪表盘",
 ]
+
+_HTML_HINT_RE = re.compile(r"<!DOCTYPE html>|<html\\b|<body\\b", re.IGNORECASE)
+_SLIDE_NARRATION_RE = re.compile(
+    r"(第\\s*\\d+\\s*页|第\\s*[一二三四五六七八九十]+\\s*页|封面|目录|新增页面|开始\\s*创建|现在开始|接下来|下一页|已完成)",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_html(text: str) -> bool:
+    if not text:
+        return False
+    return bool(_HTML_HINT_RE.search(text[:4000]))
+
+
+def _looks_like_slide_narration(text: str) -> bool:
+    if not text:
+        return False
+    snippet = text.strip()[:400]
+    return bool(_SLIDE_NARRATION_RE.search(snippet))
+
+
+def _extract_slide_index_from_path(file_path: str) -> Optional[int]:
+    if not file_path:
+        return None
+    match = re.search(r"(?:slide|page)[_-]?0*(\\d+)", file_path, re.IGNORECASE)
+    if match:
+        try:
+            return int(match.group(1))
+        except ValueError:
+            return None
+    return None
+
+
+def _normalize_slide_index(candidate: Optional[int], current: int) -> int:
+    if isinstance(candidate, int) and candidate > 0:
+        if candidate <= current:
+            return current + 1
+        return candidate
+    return current + 1
+
+
+def _extract_html_from_tool_args(tool_args: Dict) -> Tuple[str, Optional[str], Optional[int], Optional[str]]:
+    if not isinstance(tool_args, dict):
+        return "", None, None, None
+    html_content = (
+        tool_args.get("html", "") or
+        tool_args.get("content", "") or
+        tool_args.get("html_content", "") or
+        tool_args.get("code", "")
+    )
+    file_path = tool_args.get("file_path") or tool_args.get("path")
+    index = tool_args.get("index") or tool_args.get("page") or tool_args.get("page_number")
+    description = tool_args.get("action_description") or tool_args.get("description")
+    try:
+        if index is not None:
+            index = int(index)
+    except Exception:
+        index = None
+    return html_content, file_path, index, description
 
 
 def _is_background_candidate(img: Dict) -> bool:
@@ -355,46 +414,64 @@ async def run_slide_design_agent(
                                     pass
                     
                     # 处理工具调用
+                    has_slide_tool_call = False
                     if message.tool_calls:
                         for tc in message.tool_calls:
                             tool_name = tc.function.name if hasattr(tc, 'function') else str(tc)
                             tool_args = tc.function.arguments if hasattr(tc, 'function') else {}
-                            
+
                             if isinstance(tool_args, str):
                                 try:
                                     tool_args = json.loads(tool_args)
                                 except:
                                     tool_args = {"data": tool_args}
-                            
+
                             logger.info(f"Tool call: {tool_name}")
-                            
-                            # 检测幻灯片生成工具
-                            if "insert" in tool_name.lower() or "page" in tool_name.lower():
-                                slide_count += 1
-                                html_content = ""
-                                if isinstance(tool_args, dict):
-                                    html_content = (
-                                        tool_args.get("html", "") or
-                                        tool_args.get("content", "") or
-                                        tool_args.get("html_content", "") or
-                                        tool_args.get("code", "")
-                                    )
-                                
+
+                            tool_name_lower = tool_name.lower()
+                            is_slide_tool = tool_name_lower in {"insert_page", "update_page", "write_file"} or (
+                                "insert" in tool_name_lower and "page" in tool_name_lower
+                            )
+                            if is_slide_tool:
+                                has_slide_tool_call = True
+
+                            if is_slide_tool:
+                                html_content, file_path, index, action_description = _extract_html_from_tool_args(tool_args)
+
+                                if tool_name_lower == "write_file":
+                                    # write_file 可能写入非 HTML 文件，需严格过滤
+                                    if not html_content:
+                                        try:
+                                            if file_path and str(file_path).lower().endswith(".html") and Path(file_path).exists():
+                                                html_content = Path(file_path).read_text(encoding="utf-8", errors="ignore")
+                                        except Exception:
+                                            html_content = ""
+                                    if not _looks_like_html(html_content):
+                                        continue
+                                else:
+                                    if not html_content:
+                                        html_content = str(tool_args)
+
                                 if not html_content:
-                                    html_content = str(tool_args)
-                                
+                                    continue
+
+                                if index is None and file_path:
+                                    index = _extract_slide_index_from_path(str(file_path))
+
+                                slide_count = _normalize_slide_index(index, slide_count)
+
                                 logger.info(f"Created slide {slide_count}, HTML length: {len(html_content)}")
-                                
+
                                 # 提取页面描述
-                                page_description = content_text[:100] if content_text else f"第 {slide_count} 页"
-                                
+                                page_description = action_description or (content_text[:100] if content_text else f"第 {slide_count} 页")
+
                                 yield {
                                     "type": "slide",
                                     "slide_count": slide_count,
                                     "html_content": html_content,
                                     "description": page_description
                                 }
-                                
+
                                 # 生成 AI 思考文字
                                 thinking = await generate_slide_thinking(slide_count, topic)
                                 if thinking:
@@ -402,12 +479,15 @@ async def run_slide_design_agent(
                                         "type": "thinking",
                                         "content": thinking
                                     }
-                            
-                            elif tool_name.lower() == "finalize":
+
+                            elif tool_name_lower == "finalize":
                                 logger.info("Detected finalize tool call - PPT generation will complete soon")
-                    
+
                     # 发送文本消息
                     if content_text and not skip_content:
+                        # 避免与幻灯片进度类文案重复，保留关键说明类文本
+                        if has_slide_tool_call and _looks_like_slide_narration(content_text):
+                            continue
                         yield {
                             "type": "message",
                             "content": content_text,

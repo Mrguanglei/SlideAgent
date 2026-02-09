@@ -245,6 +245,8 @@ export default function Home() {
   const [deepThinkingStreaming, setDeepThinkingStreaming] = useState(false);
   const [imageSearchRounds, setImageSearchRounds] = useState<ImageSearchRound[]>([]);
   const [currentImageSearchRound, setCurrentImageSearchRound] = useState(1);
+  const lastCompletedSearchRoundRef = useRef(0);
+  const pendingImagePanelRoundRef = useRef<number | null>(null);
 
   // PPT 状态
   const [pptOutline, setPptOutline] = useState("");
@@ -905,6 +907,16 @@ export default function Home() {
             r.round === data.round ? { ...r, isCompleted: true } : r
           )
         );
+        if (typeof data.round === "number") {
+          lastCompletedSearchRoundRef.current = Math.max(
+            lastCompletedSearchRoundRef.current,
+            data.round
+          );
+        }
+        if (pendingImagePanelRoundRef.current === data.round) {
+          pendingImagePanelRoundRef.current = null;
+          openRightPanelDeferred("image_search", 300);
+        }
         break;
 
       case "deep_thinking_start":
@@ -1170,7 +1182,11 @@ export default function Home() {
         ];
       });
       setCurrentImageSearchRound(round);
-      openRightPanelDeferred("image_search");
+      if (lastCompletedSearchRoundRef.current >= round) {
+        openRightPanelDeferred("image_search", 300);
+      } else {
+        pendingImagePanelRoundRef.current = round;
+      }
     }
 
     // 处理 PPT 大纲工具

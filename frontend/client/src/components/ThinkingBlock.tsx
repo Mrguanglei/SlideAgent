@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import { Streamdown } from "streamdown";
 
 interface ThinkingBlockProps {
     content: string;
@@ -62,8 +63,8 @@ export default function ThinkingBlock({ content, status = 'completed', defaultEx
             {/* 展开的内容 */}
             {isExpanded && (
                 <div className="mt-2 px-4 py-3 rounded-lg bg-muted/30 border border-border/40">
-                    <div className="text-sm text-foreground/80 whitespace-pre-wrap leading-relaxed">
-                        {content}
+                    <div className="prose prose-sm max-w-none dark:prose-invert prose-headings:text-foreground prose-strong:text-foreground">
+                        <Streamdown>{content}</Streamdown>
                     </div>
                 </div>
             )}

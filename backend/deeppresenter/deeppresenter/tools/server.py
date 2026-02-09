@@ -7,6 +7,7 @@ from deeppresenter.utils.log import info, warning
 if __name__ == "__main__":
     import os
     import sys
+    import logging
 
     from deeppresenter.utils.log import set_logger
 
@@ -30,9 +31,13 @@ if __name__ == "__main__":
 
     if os.getenv("TAVILY_API_KEY", None):
         from . import search  # noqa: F401
-    else:
-        warning("No search tool is configured.")
 
-    info(f"Starting MCP server with workspace: {work_dir}")
+    # 静默 MCP/FastMCP 的启动日志
+    for name in ("mcp", "mcp.server", "mcp.client", "fastmcp"):
+        logging.getLogger(name).setLevel(logging.ERROR)
+
+    # 仅保留调试级别提示，避免控制台噪音
+    from deeppresenter.utils.log import debug
+    debug(f"Starting MCP server with workspace: {work_dir}")
 
     mcp.run(show_banner=False)

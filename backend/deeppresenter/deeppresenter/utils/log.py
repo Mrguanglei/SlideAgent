@@ -113,6 +113,8 @@ def info(msg, *args, **kwargs):
 
 
 def warning(msg, *args, **kwargs):
+    if isinstance(msg, str) and "No search tool is configured." in msg:
+        return
     get_logger().warning(msg, *args, **kwargs)
 
 

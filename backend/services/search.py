@@ -218,7 +218,7 @@ async def _download_and_validate_image(
 async def search_and_download_images(
     query: str,
     workspace_dir: str,
-    max_images: int = 6,
+    max_images: Optional[int] = None,
 ) -> List[Dict]:
     """搜索图片并下载验证，返回有效图片列表
 
@@ -233,6 +233,9 @@ async def search_and_download_images(
     if not Config.TAVILY_API_KEY:
         logger.warning("Tavily API key not configured, skipping image search")
         return []
+
+    if not max_images or max_images <= 0:
+        max_images = getattr(Config, "IMAGE_SEARCH_MAX", 10)
 
     try:
         from tavily import TavilyClient

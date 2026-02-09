@@ -24,6 +24,7 @@ class EnvConfig:
     # ==================== 搜索配置 ====================
     TAVILY_API_KEY: Optional[str] = None
     TAVILY_BACKUP: Optional[str] = None
+    IMAGE_SEARCH_MAX: int = 10
     
     # ==================== 数据库配置 ====================
     DATABASE_URL: Optional[str] = None
@@ -64,6 +65,10 @@ class EnvConfig:
         # 搜索配置
         cls.TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
         cls.TAVILY_BACKUP = os.getenv("TAVILY_BACKUP")
+        try:
+            cls.IMAGE_SEARCH_MAX = int(os.getenv("IMAGE_SEARCH_MAX", cls.IMAGE_SEARCH_MAX))
+        except Exception:
+            cls.IMAGE_SEARCH_MAX = cls.IMAGE_SEARCH_MAX
         
         # 数据库配置
         cls.DATABASE_URL = os.getenv("DATABASE_URL")
@@ -136,6 +141,7 @@ class EnvConfig:
         logger.info(f"Core LLM Model: {cls.PPTAGENT_MODEL}")
         logger.info(f"Core LLM API: {'✓ Configured' if cls.PPTAGENT_API_KEY else '✗ Missing'}")
         logger.info(f"Tavily Search: {'✓ Available' if cls.TAVILY_AVAILABLE else '✗ Not available'}")
+        logger.info(f"Image Search Max: {cls.IMAGE_SEARCH_MAX}")
         logger.info(f"DeepPresenter: {'✓ Available' if cls.DEEPPRESENTER_AVAILABLE else '✗ Not available'}")
         logger.info(f"Database: {'✓ Configured' if cls.DATABASE_URL else '✗ Not configured'}")
         logger.info(f"Workspace: {cls.WORKSPACE_BASE}")

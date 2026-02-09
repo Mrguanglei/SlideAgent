@@ -1,5 +1,6 @@
 import { RefObject } from "react";
 import { Loader2 } from "lucide-react";
+import { Streamdown } from "streamdown";
 import ThinkingBlock from "@/components/ThinkingBlock";
 import type { TaskPlan } from "@/types";
 
@@ -70,10 +71,10 @@ export default function TaskPlanPanel({
               </div>
             )}
             {normalContent && (
-              <div className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
-                {normalContent}
+              <div className="prose prose-sm max-w-none dark:prose-invert prose-headings:text-foreground prose-strong:text-foreground">
+                <Streamdown>{normalContent}</Streamdown>
                 {taskPlanStreaming && (
-                  <span className="inline-block w-2 h-4 bg-primary animate-pulse ml-1" />
+                  <span className="inline-block w-2 h-4 bg-primary animate-pulse ml-1 align-baseline" />
                 )}
               </div>
             )}
