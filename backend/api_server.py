@@ -15,6 +15,7 @@ import json
 import uuid
 import logging
 import asyncio
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -54,6 +55,7 @@ from services.llm import call_llm_api, call_llm_api_stream
 from services.search import (
     generate_search_queries,
     execute_search,
+    search_and_download_images,
     stream_search_thinking,
     stream_deep_thinking
 )
@@ -67,7 +69,8 @@ from services.task_planner import (
 from services.ppt_generator import (
     create_tool_call,
     parse_num_pages,
-    run_slide_design_agent
+    run_slide_design_agent,
+    replace_image_placeholders,
 )
 from services.resource_inliner import inline_all_resources
 
@@ -206,6 +209,8 @@ async def stream_ppt_generation(
                 "deep_thinking_content": existing_session.deep_thinking_content or "",
                 "supplement_data": existing_session.supplement_data or {},
                 "conversation_id": existing_session.conversation_id or conversation_id,
+                "image_results": [],
+                "workspace_dir": str(Path(Config.WORKSPACE_BASE) / session_id),
             }
             # 更新任务状态为 running
             await crud.update_session(db, session_id, task_status="running")
@@ -224,6 +229,8 @@ async def stream_ppt_generation(
                 "deep_thinking_content": "",
                 "supplement_data": supplement_data or {},
                 "conversation_id": conversation_id,
+                "image_results": [],
+                "workspace_dir": str(Path(Config.WORKSPACE_BASE) / session_id),
             }
     else:
         # 没有数据库连接时使用临时会话（兜底）
@@ -235,6 +242,8 @@ async def stream_ppt_generation(
             "deep_thinking_content": "",
             "supplement_data": supplement_data or {},
             "conversation_id": conversation_id,
+            "image_results": [],
+            "workspace_dir": str(Path(Config.WORKSPACE_BASE) / session_id),
         }
     
     # 如果提供了 supplement_data，更新会话（即使是空字典也要更新）
@@ -555,9 +564,14 @@ async def stream_ppt_generation(
             }
             yield f"data: {json.dumps(search_start_data, ensure_ascii=False)}\n\n"
             
-            # 执行搜索
-            results = await execute_search(query)
+            # 执行文字搜索和图片搜索（并行）
+            search_task = execute_search(query)
+            image_task = search_and_download_images(query, session["workspace_dir"])
+            results, image_results = await asyncio.gather(search_task, image_task)
             all_search_results.extend(results)
+            session["image_results"].extend(image_results)
+            if image_results:
+                logger.info(f"Found {len(image_results)} images for query: {query}")
             
             # 发送每个搜索结果
             for result in results[:]:
@@ -831,6 +845,8 @@ async def stream_ppt_generation(
             supplement_data=session["supplement_data"],
             num_pages=actual_num_pages,
             powerpoint_type=powerpoint_type,
+            image_results=session.get("image_results", []),
+            workspace_dir=session.get("workspace_dir", ""),
         ):
             event_type = event.get("type")
 
@@ -839,6 +855,14 @@ async def stream_ppt_generation(
                 html_content = event["html_content"]
                 description = event.get("description", f"第 {slide_count} 页")
                 
+                # 替换图片占位符（{{img_N}}）和假 URL 为本地图片的 base64
+                try:
+                    html_content = replace_image_placeholders(
+                        html_content, session.get("image_results", [])
+                    )
+                except Exception as e:
+                    logger.error(f"[Stage 7] Failed to replace image placeholders for slide {slide_count}: {e}")
+
                 # 内联外部资源（图片等）
                 try:
                     logger.info(f"[Stage 7] Inlining resources for slide {slide_count}...")

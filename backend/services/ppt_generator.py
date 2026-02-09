@@ -4,8 +4,10 @@ PPTAgent PPT 生成服务模块
 提供 PPT 生成核心功能
 """
 
+import base64
 import json
 import logging
+import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -76,6 +78,69 @@ async def generate_slide_thinking(slide_count: int, topic: str) -> Optional[str]
         return None
 
 
+def _image_to_data_uri(local_path: str) -> Optional[str]:
+    """将本地图片文件转为 base64 data URI"""
+    try:
+        path = Path(local_path)
+        if not path.exists():
+            return None
+        data = path.read_bytes()
+        ext = path.suffix.lower().lstrip(".")
+        mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+                "webp": "image/webp", "gif": "image/gif"}.get(ext, "image/jpeg")
+        b64 = base64.b64encode(data).decode()
+        return f"data:{mime};base64,{b64}"
+    except Exception as e:
+        logger.warning(f"Failed to convert image to data URI: {local_path}: {e}")
+        return None
+
+
+def replace_image_placeholders(html: str, image_results: List[Dict]) -> str:
+    """替换 HTML 中的图片占位符和假 URL 为本地图片的 base64 data URI
+
+    处理策略（按优先级）：
+    1. 替换 {{img_N}} 占位符为对应图片的 base64
+    2. 替换 example.com 等虚假 URL 为可用图片的 base64
+    3. 替换其他无法访问的外部图片 URL 为可用图片的 base64
+    """
+    if not image_results:
+        return html
+
+    # 构建占位符 → data_uri 映射
+    placeholder_map = {}
+    data_uris = []
+    for i, img in enumerate(image_results):
+        local_path = img.get("local_path", "")
+        data_uri = _image_to_data_uri(local_path)
+        if data_uri:
+            placeholder_map[f"{{{{img_{i + 1}}}}}"] = data_uri
+            data_uris.append(data_uri)
+
+    if not data_uris:
+        return html
+
+    # 第一步：替换占位符 {{img_N}}
+    for placeholder, data_uri in placeholder_map.items():
+        html = html.replace(placeholder, data_uri)
+
+    # 第二步：替换假 URL（example.com 等明显的占位地址）
+    fake_url_pattern = re.compile(
+        r'src="(https?://(?:example\.com|placeholder\.com|via\.placeholder\.com|placehold\.it|picsum\.photos|dummyimage\.com)[^"]*)"'
+    )
+    used_idx = 0
+    def _replace_fake(match):
+        nonlocal used_idx
+        if used_idx < len(data_uris):
+            replacement = data_uris[used_idx]
+            used_idx += 1
+            return f'src="{replacement}"'
+        return match.group(0)
+
+    html = fake_url_pattern.sub(_replace_fake, html)
+
+    return html
+
+
 async def run_slide_design_agent(
     topic: str,
     outline_content: str,
@@ -84,6 +149,8 @@ async def run_slide_design_agent(
     supplement_data: dict,
     num_pages: int,
     powerpoint_type: str = "16:9 Widescreen",
+    image_results: Optional[List[Dict]] = None,
+    workspace_dir: Optional[str] = None,
 ) -> AsyncGenerator[dict, None]:
     """运行 SlideDesign agent 生成 PPT"""
     
@@ -108,10 +175,26 @@ async def run_slide_design_agent(
             snippet = result.get("snippet", "")[:200]
             search_summary += f"{i}. {title}\n   {snippet}\n\n"
         
-        # 创建临时工作空间
-        workspace = Path(tempfile.mkdtemp(prefix="ppt_"))
+        # 使用传入的 workspace 或创建临时工作空间
+        if workspace_dir:
+            workspace = Path(workspace_dir)
+            workspace.mkdir(parents=True, exist_ok=True)
+        else:
+            workspace = Path(tempfile.mkdtemp(prefix="ppt_"))
         md_file = workspace / "manuscript.md"
-        
+
+        # 构建图片素材章节（使用占位符）
+        image_section = ""
+        if image_results:
+            image_section = "\n## 可用图片素材\n以下图片已验证可用。在 HTML 的 <img> 标签中，使用 {{img_N}} 作为 src 的值。\n\n"
+            for i, img in enumerate(image_results, 1):
+                desc = img.get("description", "图片") or "图片"
+                w = img.get("width", 0)
+                h = img.get("height", 0)
+                image_section += f"{i}. {{{{img_{i}}}}} — {desc} ({w}×{h})\n"
+            image_section += "\n示例：<img src=\"{{img_1}}\" alt=\"描述\">\n\n"
+            logger.info(f"Added {len(image_results)} image placeholders to markdown")
+
         md_content = f"""# {topic}
 
 ## PPT大纲
@@ -125,7 +208,7 @@ async def run_slide_design_agent(
 ## 深度分析
 
 {deep_thinking_content[:2000] if deep_thinking_content else '无'}
-"""
+{image_section}"""
         md_file.write_text(md_content, encoding="utf-8")
         logger.info(f"Created markdown file at: {md_file}")
         
@@ -133,6 +216,17 @@ async def run_slide_design_agent(
         ppt_type = PowerPointType.WIDE_SCREEN if "16:9" in powerpoint_type else PowerPointType.STANDARD
         
         # 将大纲内容直接嵌入到 instruction 中
+        image_instruction = ""
+        if image_results:
+            image_instruction = """
+⚠️ 重要：markdown 文件中提供了可用图片素材，使用 {{img_N}} 占位符引用。
+- 必须使用 <img> 标签引用图片，例如：<img src="{{img_1}}" alt="描述">
+- ⛔ 严禁使用 CSS background-image: url() 引用图片（导出 PPTX 时会丢失）
+- 封面背景图请用绝对定位 <img> + 半透明遮罩 div 实现
+- 严禁编造任何图片 URL，只能使用 {{img_N}} 占位符
+- 内容页可在相关内容旁配图以增强视觉效果
+"""
+
         enhanced_instruction = f"""{topic}
 
 ⭐⭐⭐ 重要：请严格按照以下已生成的 PPT 大纲来创建幻灯片！⭐⭐⭐
@@ -145,7 +239,7 @@ async def run_slide_design_agent(
 - 不要修改大纲中的页面数量和结构
 - 不要添加大纲中没有的页面
 - 专注于视觉设计和排版，让内容更加美观
-"""
+{image_instruction}"""
         
         input_request = InputRequest(
             instruction=enhanced_instruction,

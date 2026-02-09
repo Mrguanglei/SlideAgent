@@ -5,10 +5,10 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       - NODE_ENV=production
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_URL=http://localhost:8001
       # OAuth configuration (optional - leave empty if not using OAuth)
       - OAUTH_SERVER_URL=${OAUTH_SERVER_URL:-}
       - VITE_APP_ID=${VITE_APP_ID:-}
@@ -34,7 +34,7 @@ services:
 
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "5435:5432"
     networks:
       - pptagent-network
     restart: unless-stopped
@@ -50,7 +50,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "8001:8000"
     env_file:
       - .env
     depends_on:

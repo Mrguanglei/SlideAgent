@@ -4,8 +4,15 @@ PPTAgent 搜索服务模块
 提供 Tavily 和 DeepPresenter 搜索功能
 """
 
+import io
+import os
 import logging
+import asyncio
+from pathlib import Path
 from typing import List, Dict, Optional, AsyncGenerator
+
+import httpx
+from PIL import Image
 
 from utils.config import Config
 from services.llm import call_llm_api, call_llm_api_stream, extract_core_topic
@@ -163,6 +170,137 @@ async def execute_search(query: str, max_results: int = 10) -> List[Dict]:
     
     logger.warning(f"No search results for: {query}")
     return results
+
+
+async def _download_and_validate_image(
+    client: httpx.AsyncClient,
+    url: str,
+    description: str,
+    save_dir: Path,
+    index: int,
+) -> Optional[Dict]:
+    """下载单张图片并用 PIL 验证有效性，返回图片信息或 None"""
+    try:
+        resp = await client.get(url, timeout=15, follow_redirects=True)
+        if resp.status_code != 200:
+            return None
+
+        data = resp.content
+        img = Image.open(io.BytesIO(data))
+        width, height = img.size
+
+        # 过滤太小的图片（宽或高 < 100px）
+        if width < 100 or height < 100:
+            logger.debug(f"Image too small ({width}x{height}): {url}")
+            return None
+
+        # 保存到本地
+        ext = img.format.lower() if img.format else "jpg"
+        if ext == "jpeg":
+            ext = "jpg"
+        filename = f"img_{index}.{ext}"
+        local_path = save_dir / filename
+        local_path.write_bytes(data)
+
+        logger.info(f"Downloaded image {filename} ({width}x{height}) from {url[:80]}")
+        return {
+            "url": url,
+            "description": description or "",
+            "local_path": str(local_path),
+            "width": width,
+            "height": height,
+        }
+    except Exception as e:
+        logger.debug(f"Failed to download/validate image {url[:80]}: {e}")
+        return None
+
+
+async def search_and_download_images(
+    query: str,
+    workspace_dir: str,
+    max_images: int = 3,
+) -> List[Dict]:
+    """搜索图片并下载验证，返回有效图片列表
+
+    Args:
+        query: 搜索关键词
+        workspace_dir: 工作目录，图片保存到 workspace_dir/images/
+        max_images: 最多返回的有效图片数
+
+    Returns:
+        [{url, description, local_path, width, height}, ...]
+    """
+    if not Config.TAVILY_API_KEY:
+        logger.warning("Tavily API key not configured, skipping image search")
+        return []
+
+    try:
+        from tavily import TavilyClient
+
+        api_keys = [Config.TAVILY_API_KEY]
+        if Config.TAVILY_BACKUP:
+            api_keys.append(Config.TAVILY_BACKUP)
+
+        images_raw: List[Dict] = []
+        for api_key in api_keys:
+            try:
+                client = TavilyClient(api_key=api_key)
+                response = client.search(
+                    query=query,
+                    max_results=5,
+                    include_images=True,
+                    include_image_descriptions=True,
+                )
+                # Tavily returns images as list of {url, description} or list of strings
+                raw_images = response.get("images", [])
+                for item in raw_images:
+                    if isinstance(item, dict):
+                        images_raw.append({
+                            "url": item.get("url", ""),
+                            "description": item.get("description", ""),
+                        })
+                    elif isinstance(item, str):
+                        images_raw.append({"url": item, "description": ""})
+                logger.info(f"Tavily image search returned {len(images_raw)} images for: {query}")
+                break
+            except Exception as e:
+                logger.warning(f"Tavily image search failed with key: {str(e)[:50]}")
+                continue
+
+        if not images_raw:
+            return []
+
+        # 创建图片保存目录
+        save_dir = Path(workspace_dir) / "images"
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        # 为避免文件名冲突，统计已有图片数量（1-based: img_1, img_2, ...）
+        existing_count = len(list(save_dir.glob("img_*")))
+
+        # 并行下载并验证
+        async with httpx.AsyncClient() as http_client:
+            tasks = [
+                _download_and_validate_image(
+                    http_client,
+                    item["url"],
+                    item["description"],
+                    save_dir,
+                    existing_count + i + 1,
+                )
+                for i, item in enumerate(images_raw)
+            ]
+            results = await asyncio.gather(*tasks)
+
+        valid = [r for r in results if r is not None]
+        logger.info(f"Found {len(valid)} valid images for query: {query}")
+        return valid[:max_images]
+
+    except ImportError:
+        logger.error("Tavily package not installed, skipping image search")
+        return []
+    except Exception as e:
+        logger.error(f"Image search error: {e}")
+        return []
 
 
 async def stream_search_thinking(query: str, search_results: list, round_num: int, total_rounds: int) -> AsyncGenerator[str, None]:
