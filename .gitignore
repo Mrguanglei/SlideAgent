@@ -50,3 +50,4 @@ dist-ssr
 
 # Docker volumes
 workspace/
+ppt_workspace/
