@@ -95,6 +95,37 @@ def _image_to_data_uri(local_path: str) -> Optional[str]:
         return None
 
 
+_BACKGROUND_EXCLUDE_KEYWORDS = [
+    "chart", "graph", "table", "diagram", "infographic", "schema", "workflow",
+    "screenshot", "dashboard", "ui", "icon", "logo", "banner",
+    "图表", "表格", "示意", "流程图", "架构", "数据", "截图", "界面", "仪表盘",
+]
+
+
+def _is_background_candidate(img: Dict) -> bool:
+    """判断图片是否适合作为整页背景（启发式）"""
+    desc = (img.get("description") or "").lower()
+    url = (img.get("url") or "").lower()
+    text = f"{desc} {url}"
+
+    if any(keyword in text for keyword in _BACKGROUND_EXCLUDE_KEYWORDS):
+        return False
+
+    width = img.get("width") or 0
+    height = img.get("height") or 0
+    if not width or not height:
+        return False
+
+    if width < 900 or height < 500:
+        return False
+
+    ratio = width / height if height else 0
+    if ratio < 1.2 or ratio > 2.2:
+        return False
+
+    return True
+
+
 def replace_image_placeholders(html: str, image_results: List[Dict]) -> str:
     """替换 HTML 中的图片占位符和假 URL 为本地图片的 base64 data URI
 
@@ -187,11 +218,31 @@ async def run_slide_design_agent(
         image_section = ""
         if image_results:
             image_section = "\n## 可用图片素材\n以下图片已验证可用。在 HTML 的 <img> 标签中，使用 {{img_N}} 作为 src 的值。\n\n"
-            for i, img in enumerate(image_results, 1):
-                desc = img.get("description", "图片") or "图片"
-                w = img.get("width", 0)
-                h = img.get("height", 0)
-                image_section += f"{i}. {{{{img_{i}}}}} — {desc} ({w}×{h})\n"
+
+            indexed_images = list(enumerate(image_results, 1))
+            background_candidates = [(i, img) for i, img in indexed_images if _is_background_candidate(img)]
+            content_images = [(i, img) for i, img in indexed_images if not _is_background_candidate(img)]
+
+            image_section += "### 背景候选（仅用于封面/整页背景）\n"
+            if background_candidates:
+                for i, img in background_candidates:
+                    desc = img.get("description", "图片") or "图片"
+                    w = img.get("width", 0)
+                    h = img.get("height", 0)
+                    image_section += f"{i}. {{{{img_{i}}}}} — {desc} ({w}×{h})\n"
+            else:
+                image_section += "无\n"
+
+            image_section += "\n### 内容配图（用于插图/示意，不作背景）\n"
+            if content_images:
+                for i, img in content_images:
+                    desc = img.get("description", "图片") or "图片"
+                    w = img.get("width", 0)
+                    h = img.get("height", 0)
+                    image_section += f"{i}. {{{{img_{i}}}}} — {desc} ({w}×{h})\n"
+            else:
+                image_section += "无\n"
+
             image_section += "\n示例：<img src=\"{{img_1}}\" alt=\"描述\">\n\n"
             logger.info(f"Added {len(image_results)} image placeholders to markdown")
 
@@ -222,6 +273,8 @@ async def run_slide_design_agent(
 ⚠️ 重要：markdown 文件中提供了可用图片素材，使用 {{img_N}} 占位符引用。
 - 必须使用 <img> 标签引用图片，例如：<img src="{{img_1}}" alt="描述">
 - ⛔ 严禁使用 CSS background-image: url() 引用图片（导出 PPTX 时会丢失）
+- 背景优先使用纯色或渐变；只有在“背景候选”列表中存在合适图片时才可作为背景
+- “内容配图”仅用于插图/示意，禁止用于整页背景
 - 封面背景图请用绝对定位 <img> + 半透明遮罩 div 实现
 - 严禁编造任何图片 URL，只能使用 {{img_N}} 占位符
 - 内容页可在相关内容旁配图以增强视觉效果

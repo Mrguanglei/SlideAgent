@@ -218,7 +218,7 @@ async def _download_and_validate_image(
 async def search_and_download_images(
     query: str,
     workspace_dir: str,
-    max_images: int = 3,
+    max_images: int = 6,
 ) -> List[Dict]:
     """搜索图片并下载验证，返回有效图片列表
 
@@ -247,7 +247,7 @@ async def search_and_download_images(
                 client = TavilyClient(api_key=api_key)
                 response = client.search(
                     query=query,
-                    max_results=5,
+                    max_results=max(max_images * 2, 5),
                     include_images=True,
                     include_image_descriptions=True,
                 )

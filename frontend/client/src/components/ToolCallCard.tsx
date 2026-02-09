@@ -23,6 +23,7 @@ interface ToolCallCardProps {
   autoConfirmCountdown: number | null;
   onCancelAutoConfirm: () => void;
   onSetSearchRound?: (round: number) => void;
+  onSetImageSearchRound?: (round: number) => void;
   onScrollToSlide?: (slideIndex: number) => void;
   isShareMode?: boolean; // 分享模式，自动展开所有内容
 }
@@ -35,6 +36,7 @@ export default function ToolCallCard({
   autoConfirmCountdown,
   onCancelAutoConfirm,
   onSetSearchRound,
+  onSetImageSearchRound,
   onScrollToSlide,
   isShareMode = false,
 }: ToolCallCardProps) {
@@ -521,17 +523,35 @@ export default function ToolCallCard({
         );
 
       case "image_search":
+        const imageData = tool.data as {
+          query?: string;
+          round?: number;
+          images?: Array<{ url: string }>;
+        };
+        const imageQuery = imageData.query || "";
+        const imageRound = typeof imageData.round === "number" ? imageData.round : Number(imageData.round) || 1;
+        const imageCount = Array.isArray(imageData.images) ? imageData.images.length : 0;
         return (
           <button
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="tool-button"
+            onClick={() => {
+              onOpenPanel("image_search");
+              if (onSetImageSearchRound) {
+                onSetImageSearchRound(imageRound);
+              }
+            }}
+            className="tool-button group"
           >
-            <ImageIcon className="tool-button-icon h-4 w-4" />
+            <div className="w-5 h-5 rounded-full bg-amber-50 flex items-center justify-center">
+              <ImageIcon className="h-3 w-3 text-amber-500" />
+            </div>
             <span className="tool-button-text">搜索图片</span>
-            <span className="tool-button-query">
-              {tool.data.query as string}
+            <span className="text-muted-foreground text-sm truncate max-w-[200px]">
+              {imageQuery || "图片素材"}
             </span>
-            <ChevronRight className="tool-button-arrow h-4 w-4" />
+            {imageCount > 0 && (
+              <span className="text-xs text-muted-foreground">({imageCount})</span>
+            )}
+            <ChevronRight className="tool-button-arrow h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
           </button>
         );
 

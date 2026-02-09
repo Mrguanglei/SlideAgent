@@ -8,6 +8,7 @@ import { ChevronLeft, ChevronRight, Maximize2, X, Edit3, Share2, Download, Play 
 import PPTPreviewPanel from "./PPTPreviewPanel";
 import TaskPlanPanel from "./TaskPlanPanel";
 import SearchPanel from "./SearchPanel";
+import ImageSearchPanel from "./ImageSearchPanel";
 import PPTOutlinePanel from "./PPTOutlinePanel";
 import FilePanel from "../FilePanel";
 import type {
@@ -15,6 +16,7 @@ import type {
   PPTViewMode,
   TaskPlan,
   SearchRound,
+  ImageSearchRound,
   PPTProject,
 } from "@/types";
 import type { EditablePPTPreviewRef } from "./EditablePPTPreview";
@@ -47,6 +49,9 @@ interface RightPanelProps {
   setCurrentSearchRound: (round: number) => void;
   deepThinking: string;
   deepThinkingStreaming: boolean;
+  imageSearchRounds: ImageSearchRound[];
+  currentImageSearchRound: number;
+  setCurrentImageSearchRound: (round: number) => void;
 
   // PPT 大纲
   pptOutline: string;
@@ -85,6 +90,9 @@ export default function RightPanel({
   setCurrentSearchRound,
   deepThinking,
   deepThinkingStreaming,
+  imageSearchRounds,
+  currentImageSearchRound,
+  setCurrentImageSearchRound,
   pptOutline,
   pptOutlineStreaming,
   pptProjects,
@@ -141,6 +149,11 @@ export default function RightPanel({
           {rightPanelType === "web_search" && (
             <h3 className="font-medium text-sm">
               搜索网页{searchRounds.length > 0 && searchRounds[searchRounds.length - 1]?.results?.length > 0 && ` (${searchRounds[searchRounds.length - 1].results.length})`}
+            </h3>
+          )}
+          {rightPanelType === "image_search" && (
+            <h3 className="font-medium text-sm">
+              搜索图片{imageSearchRounds.length > 0 && imageSearchRounds[imageSearchRounds.length - 1]?.images?.length > 0 && ` (${imageSearchRounds[imageSearchRounds.length - 1].images.length})`}
             </h3>
           )}
           {rightPanelType === "ppt_outline" && (
@@ -298,6 +311,14 @@ export default function RightPanel({
             setCurrentSearchRound={setCurrentSearchRound}
             deepThinking={deepThinking}
             deepThinkingStreaming={deepThinkingStreaming}
+          />
+        )}
+
+        {rightPanelType === "image_search" && (
+          <ImageSearchPanel
+            imageSearchRounds={imageSearchRounds}
+            currentImageSearchRound={currentImageSearchRound}
+            setCurrentImageSearchRound={setCurrentImageSearchRound}
           />
         )}
 

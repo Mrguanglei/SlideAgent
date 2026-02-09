@@ -121,6 +121,7 @@ interface MessageItemProps {
   isFirstAiMessage: boolean;
   isFirstUserMessage?: boolean;
   onSetSearchRound?: (round: number) => void;
+  onSetImageSearchRound?: (round: number) => void;
   onScrollToSlide?: (slideIndex: number) => void;
   isShareMode?: boolean; // 分享模式
   showThinking?: boolean; // 是否展示思考内容
@@ -137,6 +138,7 @@ export default function MessageItem({
   isFirstAiMessage,
   isFirstUserMessage = false,
   onSetSearchRound,
+  onSetImageSearchRound,
   onScrollToSlide,
   isShareMode = false,
   showThinking = true,
@@ -232,7 +234,7 @@ export default function MessageItem({
 
                     const filtered = tools.filter((tool) => {
                       // 搜索工具：只显示 completed 状态
-                      if (tool.type === "web_search") {
+                      if (tool.type === "web_search" || tool.type === "image_search") {
                         return tool.status === "completed";
                       }
                       // 深度思考：不在对话区显示
@@ -270,6 +272,7 @@ export default function MessageItem({
                             }
                             onCancelAutoConfirm={onCancelAutoConfirm}
                             onSetSearchRound={onSetSearchRound}
+                            onSetImageSearchRound={onSetImageSearchRound}
                             onScrollToSlide={onScrollToSlide}
                             isShareMode={isShareMode}
                           />

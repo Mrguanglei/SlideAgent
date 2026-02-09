@@ -21,7 +21,7 @@ import { getShareData } from "@/lib/api";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import MessageItem from "@/components/MessageItem";
 import RightPanel from "@/components/RightPanel";
-import type { Message, ToolCall, TaskPlan, SearchRound, RightPanelType, PPTViewMode, PPTProject } from "@/types";
+import type { Message, ToolCall, TaskPlan, SearchRound, ImageSearchRound, RightPanelType, PPTViewMode, PPTProject } from "@/types";
 
 interface ShareMessage {
   id: number;
@@ -111,6 +111,8 @@ export default function ShareView() {
   // 搜索状态
   const [searchRounds, setSearchRounds] = useState<SearchRound[]>([]);
   const [currentSearchRound, setCurrentSearchRound] = useState(1);
+  const [imageSearchRounds, setImageSearchRounds] = useState<ImageSearchRound[]>([]);
+  const [currentImageSearchRound, setCurrentImageSearchRound] = useState(1);
   
   // PPT 状态
   const [pptOutline, setPptOutline] = useState("");
@@ -226,6 +228,37 @@ export default function ShareView() {
           }
           setSearchRounds(extractedRounds);
           
+          // 提取图片搜索轮次
+          const extractedImageRoundsMap = new Map<number, ImageSearchRound>();
+          for (const msg of data.messages) {
+            if (msg.tool_calls) {
+              for (const tc of msg.tool_calls) {
+                if (tc.tool_type === "image_search") {
+                  const rawRound = tc.arguments?.round ?? tc.result?.round ?? 1;
+                  const round = typeof rawRound === "number" ? rawRound : Number(rawRound) || 1;
+                  const query = tc.arguments?.query || tc.result?.query || "";
+                  const images = tc.result?.images || tc.arguments?.images || [];
+                  const existing = extractedImageRoundsMap.get(round);
+                  if (existing) {
+                    existing.images = [...existing.images, ...images];
+                  } else {
+                    extractedImageRoundsMap.set(round, {
+                      round,
+                      query,
+                      images,
+                      isCompleted: true,
+                    });
+                  }
+                }
+              }
+            }
+          }
+          const extractedImageRounds = Array.from(extractedImageRoundsMap.values()).sort((a, b) => a.round - b.round);
+          if (extractedImageRounds.length > 0) {
+            setImageSearchRounds(extractedImageRounds);
+            setCurrentImageSearchRound(extractedImageRounds[extractedImageRounds.length - 1].round);
+          }
+
           // 提取PPT大纲
           for (const msg of data.messages) {
             if (msg.tool_calls) {
@@ -377,6 +410,7 @@ export default function ShareView() {
                     isFirstAiMessage={isFirstAiMessage}
                     isFirstUserMessage={isFirstUserMessage}
                     onSetSearchRound={setCurrentSearchRound}
+                    onSetImageSearchRound={setCurrentImageSearchRound}
                     onScrollToSlide={noopFunction}
                     isShareMode={true}
                     showThinking={true}
@@ -408,6 +442,9 @@ export default function ShareView() {
           setCurrentSearchRound={setCurrentSearchRound}
           deepThinking=""
           deepThinkingStreaming={false}
+          imageSearchRounds={imageSearchRounds}
+          currentImageSearchRound={currentImageSearchRound}
+          setCurrentImageSearchRound={setCurrentImageSearchRound}
           pptOutline={pptOutline}
           pptOutlineStreaming={false}
           pptProjects={[]}

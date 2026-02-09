@@ -572,6 +572,15 @@ async def stream_ppt_generation(
             session["image_results"].extend(image_results)
             if image_results:
                 logger.info(f"Found {len(image_results)} images for query: {query}")
+            image_payload = [
+                {
+                    "url": img.get("url"),
+                    "description": img.get("description", ""),
+                    "width": img.get("width"),
+                    "height": img.get("height"),
+                }
+                for img in image_results
+            ]
             
             # 发送每个搜索结果
             for result in results[:]:
@@ -606,6 +615,21 @@ async def stream_ppt_generation(
             }
             logger.info(f"Sending tool_call event with query: '{query}'")
             yield f"data: {json.dumps(search_tool_data, ensure_ascii=False)}\n\n"
+
+            # 发送图片搜索工具调用事件
+            image_tool_data = {
+                'type': 'tool_call',
+                'tool_type': 'image_search',
+                'tool_name': '搜索图片',
+                'status': 'completed',
+                'data': {
+                    "query": query,
+                    "round": round_num,
+                    "total_rounds": len(search_queries),
+                    "images": image_payload
+                }
+            }
+            yield f"data: {json.dumps(image_tool_data, ensure_ascii=False)}\n\n"
             
             # 保存到数据库
             if db and conversation_id:
@@ -618,6 +642,11 @@ async def stream_ppt_generation(
                     )
                     sr = await crud.create_search_round(db, tc.id, query, round_num)
                     await crud.create_search_results(db, sr.id, results[:])
+                    await crud.create_tool_call(
+                        db, msg.id, "image_search", "搜索图片", "completed",
+                        arguments_json={"query": query, "round": round_num, "total_rounds": len(search_queries)},
+                        result_json={"images": image_payload}
+                    )
                     await db.commit()
                 except Exception as e:
                     logger.error(f"Failed to save search results: {e}")

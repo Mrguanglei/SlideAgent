@@ -33,12 +33,15 @@ export interface ToolCall {
 export interface ToolCallData {
   // 通用字段
   query?: string;
+  round?: number;
 
   // 任务规划
   taskPlan?: TaskPlan;
 
   // 搜索相关
   searchRounds?: SearchRound[];
+  images?: ImageSearchResult[];
+  imageSearchRounds?: ImageSearchRound[];
 
   // 补充信息
   audienceQuestion?: string;
@@ -102,6 +105,23 @@ export interface SearchResult {
   date?: string;
 }
 
+// 图片搜索结果
+export interface ImageSearchResult {
+  url: string;
+  description?: string;
+  width?: number;
+  height?: number;
+  local_path?: string;
+}
+
+// 图片搜索轮次
+export interface ImageSearchRound {
+  round: number;
+  query: string;
+  images: ImageSearchResult[];
+  isCompleted: boolean;
+}
+
 // PPT 项目
 export interface PPTProject {
   id: number;
@@ -151,7 +171,14 @@ export interface Conversation {
 }
 
 // 右侧面板类型
-export type RightPanelType = "task_plan" | "web_search" | "ppt_outline" | "ppt_preview" | "files" | null;
+export type RightPanelType =
+  | "task_plan"
+  | "web_search"
+  | "image_search"
+  | "ppt_outline"
+  | "ppt_preview"
+  | "files"
+  | null;
 
 // PPT 视图模式
 export type PPTViewMode = "preview" | "code";

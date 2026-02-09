@@ -48,6 +48,7 @@ import type {
   ToolCall,
   TaskPlan,
   SearchRound,
+  ImageSearchRound,
   RightPanelType,
   PPTViewMode,
   PPTProject,
@@ -242,6 +243,8 @@ export default function Home() {
   const [currentSearchRound, setCurrentSearchRound] = useState(1);
   const [deepThinking, setDeepThinking] = useState("");
   const [deepThinkingStreaming, setDeepThinkingStreaming] = useState(false);
+  const [imageSearchRounds, setImageSearchRounds] = useState<ImageSearchRound[]>([]);
+  const [currentImageSearchRound, setCurrentImageSearchRound] = useState(1);
 
   // PPT 状态
   const [pptOutline, setPptOutline] = useState("");
@@ -385,6 +388,10 @@ export default function Home() {
         setIsLoading(false);
       }
 
+      // 重置图片搜索状态，避免切换对话时残留
+      setImageSearchRounds([]);
+      setCurrentImageSearchRound(1);
+
       // 恢复消息
       if (data.messages) {
         const restoredMessages: Message[] = data.messages.map((msg: any) => ({
@@ -474,6 +481,37 @@ export default function Home() {
           setCurrentSearchRound(extractedRounds[extractedRounds.length - 1].round);
         }
 
+        // 提取图片搜索轮次
+        const extractedImageRoundsMap = new Map<number, ImageSearchRound>();
+        for (const msg of data.messages) {
+          if (msg.tool_calls) {
+            for (const tc of msg.tool_calls) {
+              if (tc.tool_type === "image_search") {
+                const rawRound = tc.arguments?.round ?? tc.result?.round ?? 1;
+                const round = typeof rawRound === "number" ? rawRound : Number(rawRound) || 1;
+                const query = tc.arguments?.query || tc.result?.query || "";
+                const images = tc.result?.images || tc.arguments?.images || [];
+                const existing = extractedImageRoundsMap.get(round);
+                if (existing) {
+                  existing.images = [...existing.images, ...images];
+                } else {
+                  extractedImageRoundsMap.set(round, {
+                    round,
+                    query,
+                    images,
+                    isCompleted: true,
+                  });
+                }
+              }
+            }
+          }
+        }
+        const extractedImageRounds = Array.from(extractedImageRoundsMap.values()).sort((a, b) => a.round - b.round);
+        if (extractedImageRounds.length > 0) {
+          setImageSearchRounds(extractedImageRounds);
+          setCurrentImageSearchRound(extractedImageRounds[extractedImageRounds.length - 1].round);
+        }
+
         // 提取 PPT 大纲
         for (const msg of data.messages) {
           if (msg.tool_calls) {
@@ -513,6 +551,8 @@ export default function Home() {
     setCurrentSearchRound(1);
     setDeepThinking("");
     setDeepThinkingStreaming(false);
+    setImageSearchRounds([]);
+    setCurrentImageSearchRound(1);
     setPptOutline("");
     setPptOutlineStreaming(false);
     setPptHtmlCode("");
@@ -823,19 +863,31 @@ export default function Home() {
         }
         break;
 
-      case "search_start":
+      case "search_start": {
+        const roundNumber = typeof data.round === "number" ? data.round : Number(data.round) || 1;
         setSearchRounds(prev => [
           ...prev,
           {
-            round: data.round,
+            round: roundNumber,
             query: data.query,
             results: [],
             isCompleted: false,
           },
         ]);
-        setCurrentSearchRound(data.round);
+        setImageSearchRounds(prev => [
+          ...prev,
+          {
+            round: roundNumber,
+            query: data.query,
+            images: [],
+            isCompleted: false,
+          },
+        ]);
+        setCurrentSearchRound(roundNumber);
+        setCurrentImageSearchRound(roundNumber);
         openRightPanelDeferred("web_search");
         break;
+      }
 
       case "search_result":
         setSearchRounds(prev =>
@@ -1090,6 +1142,35 @@ export default function Home() {
       });
       setCurrentSearchRound(round);
       openRightPanelDeferred("web_search");
+    }
+
+    // 处理图片搜索工具
+    if (data.tool_type === "image_search") {
+      const imageData = data.data as any;
+      const round = typeof imageData.round === "number" ? imageData.round : Number(imageData.round) || 1;
+      const images = imageData.images || [];
+
+      setImageSearchRounds(prev => {
+        const existingRound = prev.find(r => r.round === round);
+        if (existingRound) {
+          return prev.map(r =>
+            r.round === round
+              ? { ...r, images: [...r.images, ...images], isCompleted: true }
+              : r
+          );
+        }
+        return [
+          ...prev,
+          {
+            round,
+            query: imageData.query || "",
+            images,
+            isCompleted: true,
+          },
+        ];
+      });
+      setCurrentImageSearchRound(round);
+      openRightPanelDeferred("image_search");
     }
 
     // 处理 PPT 大纲工具
@@ -1552,6 +1633,7 @@ export default function Home() {
                       isFirstAiMessage={isFirstAiMessage}
                       isFirstUserMessage={isFirstUserMessage}
                       onSetSearchRound={setCurrentSearchRound}
+                      onSetImageSearchRound={setCurrentImageSearchRound}
                       onScrollToSlide={handleScrollToSlide}
                       showThinking={deepThinkingMode}
                       isLoading={isLoading}
@@ -1725,11 +1807,11 @@ export default function Home() {
       </div>
 
       {/* 右侧面板 */}
-      <RightPanel
-        rightPanelType={rightPanelType}
-        setRightPanelType={setRightPanelType}
-        showRightPanel={showRightPanel}
-        setShowRightPanel={setShowRightPanel}
+        <RightPanel
+          rightPanelType={rightPanelType}
+          setRightPanelType={setRightPanelType}
+          showRightPanel={showRightPanel}
+          setShowRightPanel={setShowRightPanel}
         isLoading={isLoading}
         pptHtmlCode={pptHtmlCode}
         pptViewMode={pptViewMode}
@@ -1741,14 +1823,17 @@ export default function Home() {
         targetSlideIndex={targetSlideIndex}
         taskPlan={taskPlan}
         taskPlanStreaming={taskPlanStreaming}
-        searchRounds={searchRounds}
-        currentSearchRound={currentSearchRound}
-        setCurrentSearchRound={setCurrentSearchRound}
-        deepThinking={deepThinking}
-        deepThinkingStreaming={deepThinkingStreaming}
-        pptOutline={pptOutline}
-        pptOutlineStreaming={pptOutlineStreaming}
-        pptProjects={pptProjects}
+          searchRounds={searchRounds}
+          currentSearchRound={currentSearchRound}
+          setCurrentSearchRound={setCurrentSearchRound}
+          deepThinking={deepThinking}
+          deepThinkingStreaming={deepThinkingStreaming}
+          imageSearchRounds={imageSearchRounds}
+          currentImageSearchRound={currentImageSearchRound}
+          setCurrentImageSearchRound={setCurrentImageSearchRound}
+          pptOutline={pptOutline}
+          pptOutlineStreaming={pptOutlineStreaming}
+          pptProjects={pptProjects}
         onSelectProject={handleSelectProject}
         onDownload={handleDownload}
         onShare={handleShare}
