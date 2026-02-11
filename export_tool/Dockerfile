@@ -12,6 +12,7 @@ RUN npm config set registry ${NPM_REGISTRY} \
   && pnpm install --include=dev \
   && pnpm build
 
+  
 FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.11-slim
 
 # 设置环境变量

@@ -19,6 +19,7 @@ backend/deeppresenter/deeppresenter/config.yaml
 .history/
 .claude
 # Logs
+
 logs
 *.log
 npm-debug.log*

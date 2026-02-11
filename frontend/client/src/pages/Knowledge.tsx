@@ -125,22 +125,22 @@ function formatTime(dateStr: string): string {
   const date = new Date(dateStr);
   const now = new Date();
   const diff = now.getTime() - date.getTime();
-  
+
   if (diff < 60000) return "刚刚";
   if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`;
   if (diff < 86400000) return `${Math.floor(diff / 3600000)} 小时前`;
   if (diff < 604800000) return `${Math.floor(diff / 86400000)} 天前`;
-  
+
   return date.toLocaleDateString("zh-CN");
 }
 
 export default function Knowledge() {
   const [, setLocation] = useLocation();
-  
+
   // 侧边栏状态
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  
+
   // 加载对话列表
   useEffect(() => {
     const loadConversations = async () => {
@@ -153,7 +153,7 @@ export default function Knowledge() {
     };
     loadConversations();
   }, []);
-  
+
   // 删除对话
   const handleDeleteConversation = async (id: number) => {
     try {
@@ -163,14 +163,14 @@ export default function Knowledge() {
       console.error("删除对话失败:", error);
     }
   };
-  
+
   // 状态
   const [folders, setFolders] = useState<KnowledgeFolder[]>([]);
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [currentFolderId, setCurrentFolderId] = useState<number | null>(null);
   const [folderPath, setFolderPath] = useState<KnowledgeFolder[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  
+
   // 弹窗状态
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showNewFolderModal, setShowNewFolderModal] = useState(false);
@@ -183,7 +183,7 @@ export default function Knowledge() {
   const [allFolders, setAllFolders] = useState<KnowledgeFolder[]>([]);
   const [showNewFolderInput, setShowNewFolderInput] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
-  
+
   // 上传状态
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [urlInput, setUrlInput] = useState("");
@@ -191,13 +191,13 @@ export default function Knowledge() {
   const [textTitle, setTextTitle] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  
+
   // 搜索状态
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const prevParsingCountRef = useRef<number>(0);
@@ -263,13 +263,13 @@ export default function Knowledge() {
       }
     };
   }, []);
-  
+
   // 进入文件夹
   const enterFolder = (folder: KnowledgeFolder) => {
     setFolderPath([...folderPath, folder]);
     setCurrentFolderId(folder.id);
   };
-  
+
   // 返回上级
   const goBack = (index: number) => {
     if (index < 0) {
@@ -280,7 +280,7 @@ export default function Knowledge() {
       setCurrentFolderId(folderPath[index].id);
     }
   };
-  
+
   // 创建文件夹
   const createFolder = async (name: string) => {
     try {
@@ -330,7 +330,7 @@ export default function Knowledge() {
       toast.error("创建文件夹失败，请检查网络连接");
     }
   };
-  
+
   // 添加待上传文件
   const addPendingFiles = (files: FileList | File[]) => {
     const fileArray = Array.from(files);
@@ -342,18 +342,18 @@ export default function Knowledge() {
     }));
     setPendingFiles(prev => [...prev, ...newPendingFiles]);
   };
-  
+
   // 移除待上传文件
   const removePendingFile = (id: string) => {
     setPendingFiles(prev => prev.filter(f => f.id !== id));
   };
-  
+
   // 确认上传所有文件
   const confirmUpload = async () => {
     if (pendingFiles.length === 0 && !urlInput.trim() && !textInput.trim()) return;
-    
+
     setIsUploading(true);
-    
+
     try {
       // 上传文件
       for (const pendingFile of pendingFiles) {
@@ -362,13 +362,13 @@ export default function Knowledge() {
         if (currentFolderId) {
           formData.append("folder_id", currentFolderId.toString());
         }
-        
+
         await fetch(`${API_BASE}/api/knowledge/documents/upload`, {
           method: "POST",
           body: formData,
         });
       }
-      
+
       // 上传 URL
       if (urlInput.trim()) {
         await fetch(`${API_BASE}/api/knowledge/documents/url`, {
@@ -377,20 +377,20 @@ export default function Knowledge() {
           body: JSON.stringify({ url: urlInput, folder_id: currentFolderId }),
         });
       }
-      
+
       // 上传文本
       if (textInput.trim()) {
         await fetch(`${API_BASE}/api/knowledge/documents/text`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
-            text: textInput, 
+          body: JSON.stringify({
+            text: textInput,
             title: textTitle || "文本内容",
-            folder_id: currentFolderId 
+            folder_id: currentFolderId
           }),
         });
       }
-      
+
       // 清空并关闭
       setPendingFiles([]);
       setUrlInput("");
@@ -404,15 +404,15 @@ export default function Knowledge() {
       setIsUploading(false);
     }
   };
-  
+
   // 重命名
   const handleRename = async (newName: string) => {
     if (!renameTarget) return;
     try {
-      const endpoint = renameTarget.type === "folder" 
+      const endpoint = renameTarget.type === "folder"
         ? `${API_BASE}/api/knowledge/folders/${renameTarget.id}`
         : `${API_BASE}/api/knowledge/documents/${renameTarget.id}/rename`;
-      
+
       await fetch(endpoint, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -425,7 +425,7 @@ export default function Knowledge() {
       console.error("重命名失败:", error);
     }
   };
-  
+
   // 删除文件夹
   const deleteFolder = async (id: number) => {
     if (!confirm("确定要删除此文件夹吗？文件夹内的所有文档也会被删除。")) return;
@@ -436,7 +436,7 @@ export default function Knowledge() {
       console.error("删除文件夹失败:", error);
     }
   };
-  
+
   // 删除文档
   const deleteDocument = async (id: number) => {
     if (!confirm("确定要删除此文档吗？")) return;
@@ -447,7 +447,7 @@ export default function Knowledge() {
       console.error("删除文档失败:", error);
     }
   };
-  
+
   // 下载文档
   const downloadDocument = async (doc: KnowledgeDocument) => {
     window.open(`${API_BASE}/api/knowledge/documents/${doc.id}/download`, "_blank");
@@ -489,7 +489,7 @@ export default function Knowledge() {
       console.error("移动文档失败:", error);
     }
   };
-  
+
   // 重新处理文档
   const reprocessDocument = async (id: number) => {
     try {
@@ -499,18 +499,18 @@ export default function Knowledge() {
       console.error("重新处理失败:", error);
     }
   };
-  
+
   // 拖拽处理
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(true);
   };
-  
+
   const handleDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
   };
-  
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
@@ -519,7 +519,7 @@ export default function Knowledge() {
       addPendingFiles(files);
     }
   };
-  
+
   // 渲染解析状态
   const renderParseStatus = (doc: KnowledgeDocument) => {
     switch (doc.parse_status) {
@@ -555,26 +555,26 @@ export default function Knowledge() {
         return null;
     }
   };
-  
+
   return (
     <div className="h-screen flex overflow-hidden">
       {/* 侧边栏 */}
       <ConversationSidebar
         conversations={conversations}
         currentConversationId={null}
-        onSelectConversation={(conv) => setLocation(`/?conversation=${conv.id}`)}
+        onSelectConversation={(conv) => setLocation(`/chat/${conv.uuid}`)}
         onDeleteConversation={handleDeleteConversation}
-        onNewChat={() => setLocation("/")}
+        onNewChat={() => setLocation("/chat")}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
       />
-      
+
       {/* 主内容区 */}
       <div className="flex-1 flex flex-col bg-gray-50 overflow-hidden">
         {/* 头部 */}
         <div className="flex-shrink-0 px-6 py-4 bg-white border-b">
           <h1 className="text-xl font-bold mb-4">知识库</h1>
-          
+
           {/* 操作按钮和搜索框 */}
           <div className="flex items-center gap-4 mb-4">
             {/* 左侧按钮 */}
@@ -588,9 +588,9 @@ export default function Knowledge() {
                 新建文件夹
               </Button>
             </div>
-            
+
             {/* 右侧搜索框 */}
-            <div 
+            <div
               className="relative flex-1 max-w-md cursor-text"
               onClick={() => setShowSearchDialog(true)}
             >
@@ -602,11 +602,11 @@ export default function Knowledge() {
               />
             </div>
           </div>
-          
+
           {/* 面包屑导航 */}
           {folderPath.length > 0 && (
             <div className="flex items-center gap-1 mt-3 text-sm">
-              <button 
+              <button
                 onClick={() => goBack(-1)}
                 className="text-muted-foreground hover:text-foreground transition-colors"
               >
@@ -619,8 +619,8 @@ export default function Knowledge() {
                     onClick={() => goBack(index)}
                     className={cn(
                       "transition-colors",
-                      index === folderPath.length - 1 
-                        ? "font-medium text-foreground" 
+                      index === folderPath.length - 1
+                        ? "font-medium text-foreground"
                         : "text-muted-foreground hover:text-foreground"
                     )}
                   >
@@ -631,7 +631,7 @@ export default function Knowledge() {
             </div>
           )}
         </div>
-        
+
         {/* 内容区 */}
         <div className="flex-1 overflow-auto p-6">
           {isLoading ? (
@@ -679,7 +679,7 @@ export default function Knowledge() {
                           重命名
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem 
+                        <DropdownMenuItem
                           onClick={() => deleteFolder(folder.id)}
                           className="text-red-500 focus:text-red-500"
                         >
@@ -695,7 +695,7 @@ export default function Knowledge() {
                   </p>
                 </div>
               ))}
-              
+
               {/* 文档 */}
               {documents.map(doc => (
                 <div
@@ -751,15 +751,15 @@ export default function Knowledge() {
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
-                  
+
                   <div className="mb-3">
                     {FILE_TYPE_ICONS[doc.file_type] || <File className="h-10 w-10 text-gray-400" />}
                   </div>
-                  
+
                   <h3 className="font-medium text-sm truncate mb-2" title={doc.display_name || doc.filename}>
                     {doc.display_name || doc.filename}
                   </h3>
-                  
+
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-muted-foreground">
                       .{doc.file_type} {formatFileSize(doc.file_size)}
@@ -772,7 +772,7 @@ export default function Knowledge() {
           )}
         </div>
       </div>
-      
+
       {/* 上传弹窗 */}
       <Dialog open={showUploadModal} onOpenChange={(open) => {
         setShowUploadModal(open);
@@ -787,14 +787,14 @@ export default function Knowledge() {
           <DialogHeader>
             <DialogTitle>上传</DialogTitle>
           </DialogHeader>
-          
+
           <div className="space-y-4">
             {/* 文件上传区域 */}
             <div
               className={cn(
                 "border-2 border-dashed rounded-xl p-6 text-center transition-all cursor-pointer",
-                isDragging 
-                  ? "border-primary bg-primary/5" 
+                isDragging
+                  ? "border-primary bg-primary/5"
                   : "border-gray-200 hover:border-primary/50 hover:bg-gray-50"
               )}
               onDragOver={handleDragOver}
@@ -822,13 +822,13 @@ export default function Knowledge() {
                 }}
               />
             </div>
-            
+
             {/* 待上传文件列表 */}
             {pendingFiles.length > 0 && (
               <div className="space-y-2 max-h-40 overflow-auto">
                 {pendingFiles.map(file => (
-                  <div 
-                    key={file.id} 
+                  <div
+                    key={file.id}
                     className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2"
                   >
                     <div className="flex items-center gap-2 min-w-0">
@@ -838,7 +838,7 @@ export default function Knowledge() {
                         {formatFileSize(file.size)}
                       </span>
                     </div>
-                    <button 
+                    <button
                       onClick={() => removePendingFile(file.id)}
                       className="p-1 hover:bg-gray-200 rounded transition-colors"
                     >
@@ -848,7 +848,7 @@ export default function Knowledge() {
                 ))}
               </div>
             )}
-            
+
             {/* 分隔线 */}
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
@@ -858,7 +858,7 @@ export default function Knowledge() {
                 <span className="bg-white px-2 text-muted-foreground">或</span>
               </div>
             </div>
-            
+
             {/* URL 输入 */}
             <div className="flex gap-2">
               <Input
@@ -867,17 +867,17 @@ export default function Knowledge() {
                 onChange={(e) => setUrlInput(e.target.value)}
                 className="flex-1"
               />
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 size="sm"
-                onClick={() => {}}
+                onClick={() => { }}
                 disabled={!urlInput.trim()}
                 className="shrink-0"
               >
                 添加网站
               </Button>
             </div>
-            
+
             {/* 文本输入 */}
             <div className="space-y-2">
               <Textarea
@@ -889,10 +889,10 @@ export default function Knowledge() {
               />
               {textInput.trim() && (
                 <div className="flex justify-end">
-                  <Button 
-                    variant="outline" 
+                  <Button
+                    variant="outline"
                     size="sm"
-                    onClick={() => {}}
+                    onClick={() => { }}
                     disabled={!textInput.trim()}
                   >
                     添加文字
@@ -901,15 +901,15 @@ export default function Knowledge() {
               )}
             </div>
           </div>
-          
+
           <DialogFooter className="mt-4">
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => setShowUploadModal(false)}
             >
               取消
             </Button>
-            <Button 
+            <Button
               onClick={confirmUpload}
               disabled={isUploading || (pendingFiles.length === 0 && !urlInput.trim() && !textInput.trim())}
               className="gap-2"
@@ -929,7 +929,7 @@ export default function Knowledge() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      
+
       {/* 新建文件夹弹窗 */}
       <Dialog open={showNewFolderModal} onOpenChange={setShowNewFolderModal}>
         <DialogContent className="sm:max-w-md">
@@ -956,7 +956,7 @@ export default function Knowledge() {
           </form>
         </DialogContent>
       </Dialog>
-      
+
       {/* 重命名弹窗 */}
       <Dialog open={showRenameModal} onOpenChange={setShowRenameModal}>
         <DialogContent className="sm:max-w-md">
@@ -1076,7 +1076,7 @@ export default function Knowledge() {
           <DialogHeader>
             <DialogTitle>搜索知识库</DialogTitle>
           </DialogHeader>
-          
+
           {/* 搜索输入框 */}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -1085,12 +1085,12 @@ export default function Knowledge() {
               onChange={(e) => {
                 const query = e.target.value;
                 setSearchQuery(query);
-                
+
                 // 清除之前的定时器
                 if (searchTimeoutRef.current) {
                   clearTimeout(searchTimeoutRef.current);
                 }
-                
+
                 // 设置防抖
                 if (query.trim()) {
                   setIsSearching(true);
@@ -1120,7 +1120,7 @@ export default function Knowledge() {
               autoFocus
             />
           </div>
-          
+
           {/* 搜索结果 */}
           <div className="flex-1 overflow-auto mt-4">
             {isSearching ? (
