@@ -9,6 +9,7 @@ services:
     environment:
       - NODE_ENV=production
       - VITE_API_URL=http://localhost:8001
+      - PPT_DEMO_DIR=/app/PPT_demo
       # OAuth configuration (optional - leave empty if not using OAuth)
       - OAUTH_SERVER_URL=${OAUTH_SERVER_URL:-}
       - VITE_APP_ID=${VITE_APP_ID:-}
@@ -20,6 +21,8 @@ services:
       - backend
     networks:
       - pptagent-network
+    volumes:
+      - ./PPT_demo:/app/PPT_demo:ro
 
   # PostgreSQL 数据库服务
   db:
@@ -53,6 +56,9 @@ services:
       - "8001:8000"
     env_file:
       - .env
+    environment:
+      - PPT_DEMO_DIR=/app/PPT_demo
+      - PPT_DEMO_CACHE_DIR=/tmp/ppt_demo_cache
     depends_on:
       db:
         condition: service_healthy
@@ -60,6 +66,8 @@ services:
       - pptagent-network
     volumes:
       - ./backend:/app
+      - ./PPT_demo:/app/PPT_demo:ro
+      - ppt-demo-cache:/tmp/ppt_demo_cache
       - ppt-workspace:/tmp/ppt_workspace
       - /var/run/docker.sock:/var/run/docker.sock
     privileged: true
@@ -96,6 +104,7 @@ volumes:
   ppt-workspace:
   postgres_data:
   export-workspace:
+  ppt-demo-cache:
 
 networks:
   pptagent-network:

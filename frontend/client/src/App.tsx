@@ -4,6 +4,9 @@ import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
+import DemoGallery from "./pages/DemoGallery";
+import DemoPlayer from "./pages/DemoPlayer";
+import Landing from "./pages/Landing";
 import Home from "./pages/Home";
 import ShareView from "./pages/ShareView";
 import PPTPlayer from "./pages/PPTPlayer";
@@ -12,7 +15,9 @@ import Knowledge from "./pages/Knowledge";
 function Router() {
   return (
     <Switch>
-      <Route path={"/"} component={Home} />
+      <Route path={"/"} component={Landing} />
+      <Route path="/demos" component={DemoGallery} />
+      <Route path="/demos/:name" component={DemoPlayer} />
       <Route path="/chat" component={Home} />
       <Route path="/chat/:conversationId" component={Home} />
       <Route path="/knowledge-base" component={Knowledge} />

@@ -135,7 +135,12 @@ export default function ConversationSidebar({
       <div className="w-52 h-full bg-gray-50/80 border-r border-border flex flex-col shrink-0">
         {/* 顶部 Logo + 折叠按钮 */}
         <div className="h-14 flex items-center justify-between px-3 shrink-0">
-          <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setLocation("/")}
+            className="flex items-center gap-2 rounded-lg px-1.5 py-1 transition-colors hover:bg-gray-200/80"
+            title="返回首页"
+          >
             <div className="w-7 h-7 rounded-lg overflow-hidden bg-primary/10 flex items-center justify-center">
               <img
                 src="/logo.png"
@@ -144,7 +149,7 @@ export default function ConversationSidebar({
               />
             </div>
             <span className="font-bold text-sm">SlideAgent</span>
-          </div>
+          </button>
           <button
             onClick={onToggleCollapse}
             className="p-1 hover:bg-gray-200 rounded-lg transition-colors"

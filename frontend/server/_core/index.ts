@@ -1,5 +1,8 @@
 import "dotenv/config";
 import express from "express";
+import AdmZip from "adm-zip";
+import fs from "fs/promises";
+import path from "path";
 import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
@@ -38,6 +41,8 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
+  const demoDir =
+    process.env.PPT_DEMO_DIR || path.resolve(process.cwd(), "..", "PPT_demo");
 
   const proxySSE = async (req: express.Request, res: express.Response, backendPath: string) => {
     try {
@@ -96,6 +101,69 @@ async function startServer() {
     console.log("[Proxy] Request body:", JSON.stringify(req.body, null, 2));
     await proxySSE(req, res, "/api/chat");
   });
+
+  // Demo PPT list (local only)
+  app.get("/api/demo/list", async (_req, res) => {
+    try {
+      const entries = await fs.readdir(demoDir, { withFileTypes: true });
+      const files = await Promise.all(
+        entries
+          .filter(entry => entry.isFile() && entry.name.toLowerCase().endsWith(".pptx"))
+          .map(async entry => {
+            const filePath = path.join(demoDir, entry.name);
+            const stat = await fs.stat(filePath);
+            return {
+              name: entry.name,
+              size: stat.size,
+              modifiedAt: stat.mtime.toISOString(),
+              url: `/demo-files/${encodeURIComponent(entry.name)}`,
+              thumbnailUrl: `/api/demo/thumbnail/${encodeURIComponent(entry.name)}`,
+            };
+          })
+      );
+      res.json({ items: files });
+    } catch (error) {
+      console.warn("[Demo] Failed to read PPT_demo directory:", error);
+      res.json({ items: [] });
+    }
+  });
+
+  // PPTX thumbnail (docProps/thumbnail.*)
+  app.get("/api/demo/thumbnail/:name", async (req, res) => {
+    try {
+      const filename = req.params.name;
+      const resolved = path.resolve(demoDir, filename);
+      const demoRoot = path.resolve(demoDir);
+
+      if (!resolved.startsWith(demoRoot + path.sep)) {
+        res.status(400).json({ error: "Invalid file path" });
+        return;
+      }
+
+      const zip = new AdmZip(resolved);
+      const entry =
+        zip.getEntry("docProps/thumbnail.jpeg") ||
+        zip.getEntry("docProps/thumbnail.jpg") ||
+        zip.getEntry("docProps/thumbnail.png");
+
+      if (!entry) {
+        res.status(404).json({ error: "Thumbnail not found" });
+        return;
+      }
+
+      const buffer = entry.getData();
+      const isPng = entry.entryName.toLowerCase().endsWith(".png");
+      res.setHeader("Content-Type", isPng ? "image/png" : "image/jpeg");
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      res.send(buffer);
+    } catch (error) {
+      console.warn("[Demo] Failed to load thumbnail:", error);
+      res.status(500).json({ error: "Failed to load thumbnail" });
+    }
+  });
+
+  // Serve local demo files
+  app.use("/demo-files", express.static(demoDir));
 
   // 代理到 Python 后端的 /api/chat 接口 (SSE) - 兼容前端直连 /api/chat
   app.post("/api/chat", async (req, res) => {

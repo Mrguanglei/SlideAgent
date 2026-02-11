@@ -87,7 +87,14 @@ from database.connection import init_db, get_db
 from database import crud
 
 # 导入路由
-from routers import conversations_router, ppt_router, export_router, knowledge_router, files_router
+from routers import (
+    conversations_router,
+    ppt_router,
+    export_router,
+    knowledge_router,
+    files_router,
+    demo_router,
+)
 
 # 导入文档解析服务
 from services.knowledge.document_parser import DocumentParser
@@ -172,6 +179,7 @@ app.include_router(ppt_router)
 app.include_router(export_router)
 app.include_router(knowledge_router)
 app.include_router(files_router)
+app.include_router(demo_router)
 
 
 # ==================== Pydantic Models ====================

@@ -32,6 +32,8 @@ RUN --mount=type=cache,target=/var/cache/apt \
     build-essential git curl wget ca-certificates gnupg lsb-release \
     python3-dev libxml2-dev libxslt1-dev zlib1g-dev libffi-dev libssl-dev \
     libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev libgomp1 \
+    libreoffice poppler-utils \
+    fonts-noto-cjk fonts-noto-color-emoji fonts-wqy-zenhei fonts-wqy-microhei \
     && rm -rf /var/lib/apt/lists/*
 
 # pip/uv（带缓存）
