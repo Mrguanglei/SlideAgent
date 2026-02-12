@@ -5,10 +5,10 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "3001:3000"
+      - "3000:3000"
     environment:
       - NODE_ENV=production
-      - VITE_API_URL=http://localhost:8001
+      - VITE_API_URL=http://localhost:8000
       - PPT_DEMO_DIR=/app/PPT_demo
       # OAuth configuration (optional - leave empty if not using OAuth)
       - OAUTH_SERVER_URL=${OAUTH_SERVER_URL:-}
@@ -53,7 +53,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "8001:8000"
+      - "8000:8000"
     env_file:
       - .env
     environment:
