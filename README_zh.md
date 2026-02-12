@@ -1,6 +1,6 @@
 # SlideAgent — 让 PPT 生成更简单
 
-[![English](https://img.shields.io/badge/README-English-blue.svg)](README.md) | [中文](README_zh.md)
+[English](README.md) | [中文](README_zh.md)
 
 **SlideAgent** 是一款开源的 AI 驱动演示文稿生成工具。输入主题或上传文档即可生成大纲、内容与设计，并支持在线预览与多种格式导出。
 

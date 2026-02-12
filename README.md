@@ -1,6 +1,6 @@
 # SlideAgent — Make PPT Generation Simple
 
-[![中文](https://img.shields.io/badge/README-中文-red.svg)](README_zh.md) | [English](README.md)
+[中文](README_zh.md) | [English](README.md)
 
 **SlideAgent** is an open-source, AI-driven presentation generator. Provide a topic or documents, and it produces an outline, slide content, and a themed deck with online preview and multi-format export.
 
