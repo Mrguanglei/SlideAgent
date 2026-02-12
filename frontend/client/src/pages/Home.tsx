@@ -511,9 +511,21 @@ export default function Home() {
         setIsLoading(false);
       }
 
-      // 重置图片搜索状态，避免切换对话时残留
+      // 重置工具相关状态，避免切换对话时残留
+      setTaskPlan(null);
+      setTaskPlanStreaming(false);
+      setSearchRounds([]);
+      setCurrentSearchRound(1);
+      setDeepThinking("");
+      setDeepThinkingStreaming(false);
       setImageSearchRounds([]);
       setCurrentImageSearchRound(1);
+      setPptOutline("");
+      setPptOutlineStreaming(false);
+      setPptProject(null);
+      setPptHtmlCode("");
+      setShowRightPanel(false);
+      setRightPanelType(null);
 
       // 优先恢复 PPT 项目，让预览更快出现
       if (data.ppt_project) {
@@ -527,9 +539,13 @@ export default function Home() {
             .join("\n");
           setPptHtmlCode(htmlCode);
           console.log("[PPT恢复] 成功恢复", project.slides.length, "张幻灯片");
+          setRightPanelType("ppt_preview");
+          setShowRightPanel(true);
         } else {
           console.warn("[PPT恢复] 未找到幻灯片数据", project);
           setPptHtmlCode("");
+          setShowRightPanel(false);
+          setRightPanelType(null);
         }
 
         setCurrentTopic(project.title);
@@ -537,6 +553,8 @@ export default function Home() {
         setPptProject(null);
         setPptHtmlCode("");
         setCurrentTopic(data.conversation.title);
+        setShowRightPanel(false);
+        setRightPanelType(null);
       }
 
       await waitForNextPaint();
@@ -1815,75 +1833,75 @@ export default function Home() {
               <ScrollArea className="flex-1 chat-surface">
                 <div className="max-w-4xl mx-auto px-6 pt-0 pb-8">
                   {messages.map((message, index) => {
-                  const isFirstAiMessage =
-                    message.role === "assistant" &&
-                    (index === 0 || messages[index - 1]?.role !== "assistant");
-                  const isFirstUserMessage =
-                    message.role === "user" &&
-                    (index === 0 || messages[index - 1]?.role !== "user");
+                    const isFirstAiMessage =
+                      message.role === "assistant" &&
+                      (index === 0 || messages[index - 1]?.role !== "assistant");
+                    const isFirstUserMessage =
+                      message.role === "user" &&
+                      (index === 0 || messages[index - 1]?.role !== "user");
 
-                  return (
-                    <MessageItem
-                      key={message.id}
-                      message={message}
-                      onOpenPanel={openRightPanel}
-                      onConfirmInfo={handleConfirmInfo}
-                      currentTopic={currentTopic}
-                      autoConfirmCountdown={autoConfirmCountdown}
-                      onCancelAutoConfirm={cancelAutoConfirm}
-                      isFirstAiMessage={isFirstAiMessage}
-                      isFirstUserMessage={isFirstUserMessage}
-                      onSetSearchRound={setCurrentSearchRound}
-                      onSetImageSearchRound={setCurrentImageSearchRound}
-                      onScrollToSlide={handleScrollToSlide}
-                      showThinking={deepThinkingMode}
-                      isLoading={isLoading}
-                    />
-                  );
-                })}
+                    return (
+                      <MessageItem
+                        key={message.id}
+                        message={message}
+                        onOpenPanel={openRightPanel}
+                        onConfirmInfo={handleConfirmInfo}
+                        currentTopic={currentTopic}
+                        autoConfirmCountdown={autoConfirmCountdown}
+                        onCancelAutoConfirm={cancelAutoConfirm}
+                        isFirstAiMessage={isFirstAiMessage}
+                        isFirstUserMessage={isFirstUserMessage}
+                        onSetSearchRound={setCurrentSearchRound}
+                        onSetImageSearchRound={setCurrentImageSearchRound}
+                        onScrollToSlide={handleScrollToSlide}
+                        showThinking={deepThinkingMode}
+                        isLoading={isLoading}
+                      />
+                    );
+                  })}
 
-                {isLoading && messages.length > 0 && messages[messages.length - 1]?.role === "user" && (() => {
-                  const hasAssistant = messages.some(m => m.role === "assistant");
-                  return (
+                  {isLoading && messages.length > 0 && messages[messages.length - 1]?.role === "user" && (() => {
+                    const hasAssistant = messages.some(m => m.role === "assistant");
+                    return (
+                      <div className="mb-6">
+                        {!hasAssistant ? (
+                          // 首次 AI 过渡提示
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-1 -ml-2 min-h-12">
+                              <div className="w-12 h-12 flex items-center justify-center shrink-0">
+                                <AIAvatar isActive offsetX={AI_AVATAR_OFFSET_X} />
+                              </div>
+                              <span className="text-base font-medium text-foreground leading-none">SlideAgent</span>
+                            </div>
+                            <div className="pl-8">
+                              <div className="text-base text-foreground leading-relaxed whitespace-pre-wrap">
+                                <span>让我先核对下本轮任务的目标和重点偏好，正在梳理您的需求~</span>
+                                <span className="inline-flex items-center ml-2 align-middle">
+                                  <span className="w-2 h-2 rounded-full bg-primary animate-pulse align-middle" />
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          // 后续响应：使用加载动画
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-muted-foreground">正在生成中...</span>
+                            <LoadingDots />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* 确认后的加载状态 */}
+                  {isConfirming && (
                     <div className="mb-6">
-                      {!hasAssistant ? (
-                        // 首次 AI 过渡提示
-                        <div className="space-y-1.5">
-                          <div className="flex items-center gap-1 -ml-2 min-h-12">
-                            <div className="w-12 h-12 flex items-center justify-center shrink-0">
-                              <AIAvatar isActive offsetX={AI_AVATAR_OFFSET_X} />
-                            </div>
-                            <span className="text-base font-medium text-foreground leading-none">SlideAgent</span>
-                          </div>
-                          <div className="pl-8">
-                            <div className="text-base text-foreground leading-relaxed whitespace-pre-wrap">
-                              <span>让我先核对下本轮任务的目标和重点偏好，正在梳理您的需求~</span>
-                              <span className="inline-flex items-center ml-2 align-middle">
-                                <span className="w-2 h-2 rounded-full bg-primary animate-pulse align-middle" />
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        // 后续响应：使用加载动画
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-muted-foreground">正在生成中...</span>
-                          <LoadingDots />
-                        </div>
-                      )}
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground">正在生成中...</span>
+                        <LoadingDots />
+                      </div>
                     </div>
-                  );
-                })()}
-
-                {/* 确认后的加载状态 */}
-                {isConfirming && (
-                  <div className="mb-6">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-muted-foreground">正在生成中...</span>
-                      <LoadingDots />
-                    </div>
-                  </div>
-                )}
+                  )}
 
                   <div ref={messagesEndRef} />
                 </div>
@@ -2035,11 +2053,11 @@ export default function Home() {
       </div>
 
       {/* 右侧面板 */}
-        <RightPanel
-          rightPanelType={rightPanelType}
-          setRightPanelType={setRightPanelType}
-          showRightPanel={showRightPanel}
-          setShowRightPanel={setShowRightPanel}
+      <RightPanel
+        rightPanelType={rightPanelType}
+        setRightPanelType={setRightPanelType}
+        showRightPanel={showRightPanel}
+        setShowRightPanel={setShowRightPanel}
         isLoading={isLoading}
         pptHtmlCode={pptHtmlCode}
         pptViewMode={pptViewMode}
@@ -2051,17 +2069,17 @@ export default function Home() {
         targetSlideIndex={targetSlideIndex}
         taskPlan={taskPlan}
         taskPlanStreaming={taskPlanStreaming}
-          searchRounds={searchRounds}
-          currentSearchRound={currentSearchRound}
-          setCurrentSearchRound={setCurrentSearchRound}
-          deepThinking={deepThinking}
-          deepThinkingStreaming={deepThinkingStreaming}
-          imageSearchRounds={imageSearchRounds}
-          currentImageSearchRound={currentImageSearchRound}
-          setCurrentImageSearchRound={setCurrentImageSearchRound}
-          pptOutline={pptOutline}
-          pptOutlineStreaming={pptOutlineStreaming}
-          pptProjects={pptProjects}
+        searchRounds={searchRounds}
+        currentSearchRound={currentSearchRound}
+        setCurrentSearchRound={setCurrentSearchRound}
+        deepThinking={deepThinking}
+        deepThinkingStreaming={deepThinkingStreaming}
+        imageSearchRounds={imageSearchRounds}
+        currentImageSearchRound={currentImageSearchRound}
+        setCurrentImageSearchRound={setCurrentImageSearchRound}
+        pptOutline={pptOutline}
+        pptOutlineStreaming={pptOutlineStreaming}
+        pptProjects={pptProjects}
         onSelectProject={handleSelectProject}
         onDownload={handleDownload}
         onShare={handleShare}
