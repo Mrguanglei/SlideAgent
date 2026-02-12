@@ -54,6 +54,17 @@ def normalize_conversation_title(text: str, max_len: int = 32) -> str:
     return title if title else "新对话"
 
 
+def strip_think_tags(text: str) -> str:
+    """移除 <think> 标签及其内容，不截断长度。"""
+    if not text:
+        return ""
+    cleaned = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"<think>[\s\S]*$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = cleaned.lstrip("：:，,。. ")
+    return cleaned
+
+
 def clean_title_simple(text: str, max_len: int = 32, fallback: str = "未命名") -> str:
     """轻量清洗标题，不依赖正则。"""
     if not text:
@@ -550,6 +561,11 @@ async def stream_ppt_generation(
 
         # 生成补充信息选项
         supplement_info = await generate_supplement_info_with_llm(instruction)
+        if isinstance(supplement_info, dict):
+            raw_topic = supplement_info.get("topic")
+            if isinstance(raw_topic, str):
+                cleaned_topic = strip_think_tags(raw_topic) or raw_topic
+                supplement_info["topic"] = cleaned_topic
         generated_topic = supplement_info.get("topic") if isinstance(supplement_info, dict) else None
 
         # 发送补充信息工具调用事件
@@ -1000,6 +1016,7 @@ async def stream_ppt_generation(
                     supplement_topic=supplement_topic,
                     max_len=32
                 )
+                project_title = strip_think_tags(project_title) or project_title
                 session["ppt_title"] = project_title
                 ppt_project = await crud.create_ppt_project(
                     db, conversation_id, project_title, outline_content
@@ -1026,6 +1043,10 @@ async def stream_ppt_generation(
             image_results=session.get("image_results", []),
             workspace_dir=session.get("workspace_dir", ""),
         ):
+            # 生成中也要响应暂停
+            if await check_pause():
+                logger.info("[Stage 7] Paused during PPT generation, stopping stream")
+                return
             event_type = event.get("type")
 
             if event_type == "slide":
@@ -1335,6 +1356,8 @@ async def confirm(request: ConfirmRequest, db: AsyncSession = Depends(get_db)):
 
     # 从 supplement_data 中提取 AI 生成的主题（如果有）
     generated_topic = request.supplement_data.get("topic")
+    if isinstance(generated_topic, str):
+        generated_topic = strip_think_tags(generated_topic) or generated_topic
     if generated_topic and generated_topic != session_topic:
         logger.info(f"Using AI-generated topic: {generated_topic} (original: {session_topic})")
         # 更新 session 中的 topic

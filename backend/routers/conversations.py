@@ -5,6 +5,7 @@ PPTAgent 对话路由模块
 """
 
 import logging
+import re
 from typing import Optional, List
 from datetime import datetime
 
@@ -16,6 +17,16 @@ from database.connection import get_db
 from database import crud
 
 logger = logging.getLogger(__name__)
+
+
+def _strip_think_tags(text: Optional[str]) -> str:
+    if not text:
+        return ""
+    cleaned = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"<think>[\s\S]*$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = cleaned.lstrip("：:，,。. ")
+    return cleaned
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
@@ -222,6 +233,7 @@ async def get_conversation(
     ppt_project = await crud.get_ppt_project_by_conversation(db, conversation_id)
     ppt_project_dict = None
     if ppt_project:
+        clean_title = _strip_think_tags(ppt_project.title) or (ppt_project.title or "")
         # 获取最新版本
         latest_version = await crud.get_latest_ppt_version(db, ppt_project.id)
         slides = []
@@ -239,7 +251,7 @@ async def get_conversation(
 
         ppt_project_dict = {
             "id": ppt_project.id,
-            "title": ppt_project.title,
+            "title": clean_title,
             "outline_content": ppt_project.outline_content,
             "current_version": latest_version.version_number if latest_version else 1,
             "version_name": latest_version.version_name if latest_version else "V1",
@@ -353,6 +365,7 @@ async def get_conversation_by_uuid(
     ppt_project = await crud.get_ppt_project_by_conversation(db, conversation_id)
     ppt_project_dict = None
     if ppt_project:
+        clean_title = _strip_think_tags(ppt_project.title) or (ppt_project.title or "")
         # 获取最新版本
         latest_version = await crud.get_latest_ppt_version(db, ppt_project.id)
         slides = []
@@ -370,7 +383,7 @@ async def get_conversation_by_uuid(
 
         ppt_project_dict = {
             "id": ppt_project.id,
-            "title": ppt_project.title,
+            "title": clean_title,
             "outline_content": ppt_project.outline_content,
             "current_version": latest_version.version_number if latest_version else 1,
             "version_name": latest_version.version_name if latest_version else "V1",

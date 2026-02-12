@@ -6,12 +6,23 @@ PPTAgent 任务规划服务模块
 
 import json
 import logging
+import re
 from typing import Dict, Optional, AsyncGenerator, Tuple, List
 
 from services.llm import call_llm_api, call_llm_api_stream, clean_json_response
 from utils.config import Config
 
 logger = logging.getLogger(__name__)
+
+
+def _strip_think_tags(text: str) -> str:
+    if not text:
+        return ""
+    cleaned = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"<think>[\s\S]*$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = cleaned.lstrip("：:，,。. ")
+    return cleaned
 
 
 def build_task_steps(supplement_data: dict) -> list:
@@ -314,6 +325,12 @@ async def generate_supplement_info_with_llm(topic: str) -> dict:
             else:
                 raise
         
+        # 清理可能的思维链痕迹
+        if isinstance(result, dict):
+            raw_topic = result.get("topic")
+            if isinstance(raw_topic, str):
+                result["topic"] = _strip_think_tags(raw_topic) or raw_topic
+
         # 添加页数选项
         result["numPagesQuestion"] = "您期望的PPT页数范围是？"
         result["numPagesOptions"] = ["8-10页", "11-15页", "16-20页", "21-25页"]
