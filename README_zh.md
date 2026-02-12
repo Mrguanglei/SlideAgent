@@ -63,6 +63,36 @@
    - **前端:** [http://localhost:3000](http://localhost:3000)
    - **后端 API:** [http://localhost:8000/docs](http://localhost:8000/docs)
 
+## 支持模型厂商 API(已测试)
+| 厂商/系列         | 模型              | 状态    | 备注 |
+| ------------- | --------------- | ----- | -- |
+| **智谱 AI**     | GLM-5         | ✅ 已支持 |    |
+|               | GLM-4 系列    | ✅ 已支持 |    |
+|               | GLM-4-Plus      | ✅ 已支持 |    |
+|               | GLM-4-Flash     | ✅ 已支持 |    |
+| **DeepSeek**  | DeepSeek-V3     | ✅ 已支持 |    |
+|               | DeepSeek-V3.2   | ✅ 已支持 |    |
+|               | DeepSeek-R1     | ✅ 已支持 |    |
+| **MiniMax**   | MiniMax-Text 系列      | ✅ 已支持 |    |
+| **字节跳动 (豆包)** | Doubao-1.8      | ✅ 已支持 |    |
+|               | Doubao-pro   | ✅ 已支持 |    |
+
+
+## 🚧 未测试完成 (TODO)
+| 厂商/系列         | 模型                | 状态     | 备注      |
+| ------------- | ----------------- | ------ | ------- |
+| **OpenAI**    | GPT-4o            | 🚧 未测试 | 兼容模式待验证 |
+|               | GPT-4o-mini       | 🚧 未测试 |         |
+| **Anthropic** | Claude 3.5 Sonnet | 🚧 未测试 |         |
+|               | Claude 3 Opus     | 🚧 未测试 |         |
+| **阿里云**       | Qwen-Max          | 🚧 未测试 |         |
+|               | Qwen-Plus         | 🚧 未测试 |         |
+| **百度**        | ERNIE 4.0         | 🚧 未测试 |         |
+| **月之暗面**      | Kimi k1.5         | 🚧 未测试 |         |
+| **零一万物**      | Yi-Large          | 🚧 未测试 |         |
+
+
+
 ## 🧩 PPTX 导出服务（HTML -> PPTX）
 
 - **服务**：`export_tool`（FastAPI）独立运行，由 Docker Compose 启动

@@ -63,6 +63,38 @@
    - **Frontend:** [http://localhost:3000](http://localhost:3000)
    - **Backend API:** [http://localhost:8000/docs](http://localhost:8000/docs)
 
+## Supported Model Providers API (Tested)
+
+| Provider/Series | Model | Status | Notes |
+|-----------------|-------|--------|-------|
+| **Zhipu AI** | GLM-5 | ✅ Supported | |
+| | GLM-4 Series | ✅ Supported | |
+| | GLM-4-Plus | ✅ Supported | |
+| | GLM-4-Flash | ✅ Supported | |
+| **DeepSeek** | DeepSeek-V3 | ✅ Supported | |
+| | DeepSeek-V3.2 | ✅ Supported | |
+| | DeepSeek-R1 | ✅ Supported | |
+| **MiniMax** | MiniMax-Text Series | ✅ Supported | |
+| **ByteDance (Doubao)** | Doubao-1.8 | ✅ Supported | |
+| | Doubao-pro | ✅ Supported | |
+
+
+## 🚧 TODO (Not Tested)
+
+| Provider/Series | Model | Status | Notes |
+|-----------------|-------|--------|-------|
+| **OpenAI** | GPT-4o | 🚧 Not Tested | Compatibility mode pending verification |
+| | GPT-4o-mini | 🚧 Not Tested | |
+| **Anthropic** | Claude 3.5 Sonnet | 🚧 Not Tested | |
+| | Claude 3 Opus | 🚧 Not Tested | |
+| **Alibaba Cloud** | Qwen-Max | 🚧 Not Tested | |
+| | Qwen-Plus | 🚧 Not Tested | |
+| **Baidu** | ERNIE 4.0 | 🚧 Not Tested | |
+| **Moonshot AI** | Kimi k1.5 | 🚧 Not Tested | |
+| **01.AI** | Yi-Large | 🚧 Not Tested | |
+
+
+
 ## 🧩 PPTX Export Service (HTML -> PPTX)
 
 - **Service**: `export_tool` (FastAPI) runs independently and is started by Docker Compose
