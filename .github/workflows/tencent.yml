@@ -1,79 +1,111 @@
-# This workflow will build a docker container, publish and deploy it to Tencent Kubernetes Engine (TKE) when there is a push to the "main" branch.
-#
-# To configure this workflow:
-#
-# 1. Ensure that your repository contains the necessary configuration for your Tencent Kubernetes Engine cluster,
-#    including deployment.yml, kustomization.yml, service.yml, etc.
-#
-# 2. Set up secrets in your workspace:
-#    - TENCENT_CLOUD_SECRET_ID with Tencent Cloud secret id
-#    - TENCENT_CLOUD_SECRET_KEY with Tencent Cloud secret key
-#    - TENCENT_CLOUD_ACCOUNT_ID with Tencent Cloud account id
-#    - TKE_REGISTRY_PASSWORD with TKE registry password
-#
-# 3. Change the values for the TKE_IMAGE_URL, TKE_REGION, TKE_CLUSTER_ID and DEPLOYMENT_NAME environment variables (below).
+services:
+  # 前端服务（Node.js + React）
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - VITE_API_URL=http://localhost:8000
+      - PPT_DEMO_DIR=/app/PPT_demo
+      # OAuth configuration (optional - leave empty if not using OAuth)
+      - OAUTH_SERVER_URL=${OAUTH_SERVER_URL:-}
+      - VITE_APP_ID=${VITE_APP_ID:-}
+      - JWT_SECRET=${JWT_SECRET:-default-secret-change-in-production}
+      # Analytics configuration (optional - leave empty if not using analytics)
+      - VITE_ANALYTICS_ENDPOINT=${VITE_ANALYTICS_ENDPOINT:-}
+      - VITE_ANALYTICS_WEBSITE_ID=${VITE_ANALYTICS_WEBSITE_ID:-}
+    depends_on:
+      - backend
+    networks:
+      - pptagent-network
+    volumes:
+      - ./PPT_demo:/app/PPT_demo:ro
 
-name: Tencent Kubernetes Engine
+  # PostgreSQL 数据库服务
+  db:
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/postgres:16-alpine
+    container_name: pptagent_db
+    environment:
+      TZ: Asia/Shanghai
+      POSTGRES_USER: ${POSTGRES_USER:-pptagent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pptagent_secret_2024}
+      POSTGRES_DB: ${POSTGRES_DB:-pptagent_dev}
+    volumes:
 
-on:
-  push:
-    branches: [ "main" ]
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5435:5432"
+    networks:
+      - pptagent-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pptagent -d pptagent_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-# Environment variables available to all jobs and steps in this workflow
-env:
-  TKE_IMAGE_URL: ccr.ccs.tencentyun.com/demo/mywebapp
-  TKE_REGION: ap-guangzhou
-  TKE_CLUSTER_ID: cls-mywebapp
-  DEPLOYMENT_NAME: tke-test
+  # 后端服务（Python FastAPI + PPTAgent）
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - PPT_DEMO_DIR=/app/PPT_demo
+      - PPT_DEMO_CACHE_DIR=/tmp/ppt_demo_cache
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - pptagent-network
+    volumes:
+      - ./backend:/app
+      - ./PPT_demo:/app/PPT_demo:ro
+      - ppt-demo-cache:/tmp/ppt_demo_cache
+      - ppt-workspace:/tmp/ppt_workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    privileged: true
 
-permissions:
-  contents: read
+  # 导出工具服务（统一的 PDF/PNG/HTML/PPTX 导出）
+  export_tool:
+    build:
+      context: ./export_tool
+      dockerfile: Dockerfile
+    container_name: pptagent_export_tool
+    ports:
+      - "8017:8017"
+    env_file:
+      - .env
+    environment:
+      - PORT=8017
+      - PYTHONUNBUFFERED=1
+      - EXPORT_DIR=/tmp/exports
+    networks:
+      - pptagent-network
+    volumes:
+      - export-workspace:/tmp/exports
+      - ppt-workspace:/tmp/ppt_workspace
+      - ./export_tool/dom-to-pptx/material-design-icons/symbols/web:/usr/share/nginx/html/material-design-icons/symbols/web:ro
+      - ./export_tool/fonts:/app/fonts:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8017/api/export_tool/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-jobs:
-  setup-build-publish-deploy:
-    name: Setup, Build, Publish, and Deploy
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
+volumes:
+  ppt-workspace:
+  postgres_data:
+  export-workspace:
+  ppt-demo-cache:
 
-    - name: Checkout
-      uses: actions/checkout@v4
-
-    # Build
-    - name: Build Docker image
-      run: |
-        docker build -t ${TKE_IMAGE_URL}:${GITHUB_SHA} .
-
-    - name: Login TKE Registry
-      run: |
-        docker login -u ${{ secrets.TENCENT_CLOUD_ACCOUNT_ID }} -p '${{ secrets.TKE_REGISTRY_PASSWORD }}' ${TKE_IMAGE_URL}
-
-    # Push the Docker image to TKE Registry
-    - name: Publish
-      run: |
-        docker push ${TKE_IMAGE_URL}:${GITHUB_SHA}
-
-    - name: Set up Kustomize
-      run: |
-        curl -o kustomize --location https://github.com/kubernetes-sigs/kustomize/releases/download/v3.1.0/kustomize_3.1.0_linux_amd64
-        chmod u+x ./kustomize
-
-    - name: Set up ~/.kube/config for connecting TKE cluster
-      uses: TencentCloud/tke-cluster-credential-action@v1
-      with:
-        secret_id: ${{ secrets.TENCENT_CLOUD_SECRET_ID }}
-        secret_key: ${{ secrets.TENCENT_CLOUD_SECRET_KEY }}
-        tke_region: ${{ env.TKE_REGION }}
-        cluster_id: ${{ env.TKE_CLUSTER_ID }}
-
-    - name: Switch to TKE context
-      run: |
-        kubectl config use-context ${TKE_CLUSTER_ID}-context-default
-
-    # Deploy the Docker image to the TKE cluster
-    - name: Deploy
-      run: |
-        ./kustomize edit set image ${TKE_IMAGE_URL}:${GITHUB_SHA}
-        ./kustomize build . | kubectl apply -f -
-        kubectl rollout status deployment/${DEPLOYMENT_NAME}
-        kubectl get services -o wide
+networks:
+  pptagent-network:
+    driver: bridge
