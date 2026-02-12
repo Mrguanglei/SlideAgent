@@ -172,9 +172,12 @@ class LLM(BaseModel):
         for msg in messages:
             if hasattr(msg, 'model_dump'):
                 # It's a Pydantic model (ChatMessage)
-                msg_dict = msg.model_dump(
-                    exclude={'id', 'created_at', 'is_error', 'from_tool', 'extra_info', 'reasoning_content'}
-                )
+                model_lower = self.model.lower()
+                needs_reasoning_field = "reasoner" in model_lower
+                exclude_fields = {'id', 'created_at', 'is_error', 'from_tool', 'extra_info'}
+                if not needs_reasoning_field:
+                    exclude_fields.add('reasoning_content')
+                msg_dict = msg.model_dump(exclude=exclude_fields)
                 
                 # Handle content field - Zhipu API doesn't accept empty content
                 content = msg_dict.get('content')
@@ -212,6 +215,11 @@ class LLM(BaseModel):
                     msg_dict['role'] = role.value
                 elif not isinstance(role, str):
                     msg_dict['role'] = str(role)
+
+                # Ensure reasoning_content is present for reasoner models
+                if needs_reasoning_field and msg_dict.get('role') == 'assistant':
+                    if 'reasoning_content' not in msg_dict or msg_dict['reasoning_content'] is None:
+                        msg_dict['reasoning_content'] = ""
                 
                 # Handle tool_calls serialization
                 if msg_dict.get('tool_calls'):
@@ -249,6 +257,11 @@ class LLM(BaseModel):
                 if content is None or content == '' or content == []:
                     if not msg_copy.get('tool_calls'):
                         msg_copy['content'] = " "
+                model_lower = self.model.lower()
+                needs_reasoning_field = "reasoner" in model_lower
+                if needs_reasoning_field and msg_copy.get('role') == 'assistant':
+                    if 'reasoning_content' not in msg_copy or msg_copy['reasoning_content'] is None:
+                        msg_copy['reasoning_content'] = ""
                 prepared.append(msg_copy)
             else:
                 # Unknown type, try to convert

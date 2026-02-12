@@ -16,7 +16,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useParams } from "wouter";
-import { Loader2, AlertCircle } from "lucide-react";
+import { Loader2, AlertCircle, Send, Globe, Paperclip } from "lucide-react";
 import { getShareData } from "@/lib/api";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import MessageItem from "@/components/MessageItem";
@@ -100,20 +100,23 @@ export default function ShareView() {
   const [error, setError] = useState<string | null>(null);
   const [shareData, setShareData] = useState<ShareData | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  
+  const [fullMessages, setFullMessages] = useState<Message[]>([]);
+  const [playbackEnabled, setPlaybackEnabled] = useState(true);
+  const [playbackSpeed] = useState(3);
+
   // 右侧面板状态
   const [showRightPanel, setShowRightPanel] = useState(false);
   const [rightPanelType, setRightPanelType] = useState<RightPanelType>(null);
-  
+
   // 任务规划状态
   const [taskPlan, setTaskPlan] = useState<TaskPlan | null>(null);
-  
+
   // 搜索状态
   const [searchRounds, setSearchRounds] = useState<SearchRound[]>([]);
   const [currentSearchRound, setCurrentSearchRound] = useState(1);
   const [imageSearchRounds, setImageSearchRounds] = useState<ImageSearchRound[]>([]);
   const [currentImageSearchRound, setCurrentImageSearchRound] = useState(1);
-  
+
   // PPT 状态
   const [pptOutline, setPptOutline] = useState("");
   const [pptHtmlCode, setPptHtmlCode] = useState("");
@@ -122,6 +125,7 @@ export default function ShareView() {
   const [isEditMode, setIsEditMode] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const playbackCancelRef = useRef(false);
 
   useEffect(() => {
     if (!shareId) {
@@ -134,10 +138,12 @@ export default function ShareView() {
       try {
         const data = await getShareData(shareId);
         setShareData(data);
-        
+
         // 转换消息格式为 MessageItem 组件所需的格式
         const convertedMessages: Message[] = data.messages.map((msg: ShareMessage) => {
           const toolCalls: ToolCall[] = msg.tool_calls?.map((tc: ShareToolCall) => {
+            const normalizedToolType =
+              tc.tool_type === "search" ? "web_search" : tc.tool_type;
             // 构建工具调用数据
             const toolData: any = {
               ...(tc.arguments || {}),
@@ -169,7 +175,7 @@ export default function ShareView() {
 
             return {
               id: tc.id.toString(),
-              type: tc.tool_type as any,
+              type: normalizedToolType as any,
               name: tc.tool_name,
               status: tc.status as any,
               data: toolData,
@@ -185,8 +191,8 @@ export default function ShareView() {
           };
         });
 
-        setMessages(convertedMessages);
-        
+        setFullMessages(convertedMessages);
+
         // 提取任务规划、搜索轮次和PPT数据
         if (data.messages) {
           // 提取任务规划
@@ -202,7 +208,7 @@ export default function ShareView() {
               }
             }
           }
-          
+
           // 提取搜索轮次
           const extractedRounds: SearchRound[] = [];
           for (const msg of data.messages) {
@@ -227,7 +233,7 @@ export default function ShareView() {
             }
           }
           setSearchRounds(extractedRounds);
-          
+
           // 提取图片搜索轮次
           const extractedImageRoundsMap = new Map<number, ImageSearchRound>();
           for (const msg of data.messages) {
@@ -270,11 +276,11 @@ export default function ShareView() {
             }
           }
         }
-        
+
         // 处理PPT项目
         if (data.ppt_project) {
           const project = data.ppt_project;
-          
+
           // 转换为前端PPTProject格式
           const convertedProject: PPTProject = {
             id: project.id,
@@ -304,9 +310,9 @@ export default function ShareView() {
               })),
             },
           };
-          
+
           setPptProject(convertedProject);
-          
+
           // 生成HTML代码
           if (project.slides && project.slides.length > 0) {
             const htmlCode = project.slides
@@ -315,7 +321,7 @@ export default function ShareView() {
               .join("\n");
             setPptHtmlCode(htmlCode);
           }
-          
+
           // 默认打开PPT预览面板
           setRightPanelType("ppt_preview");
           setShowRightPanel(true);
@@ -330,13 +336,139 @@ export default function ShareView() {
     loadShareData();
   }, [shareId]);
 
+  useEffect(() => {
+    if (fullMessages.length === 0) return;
+    playbackCancelRef.current = false;
+
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+    const chunkSize = 12;
+    const baseChunkDelay = 30;
+    const baseUserDelay = 120;
+    const baseMessageDelay = 140;
+
+    const openPanelForToolCalls = (tools: ToolCall[]) => {
+      if (!tools || tools.length === 0) return;
+
+      const hasTaskPlan = tools.some((tool) => tool.type === "task_plan");
+      const hasWebSearch = tools.some((tool) => tool.type === "web_search");
+      const hasImageSearch = tools.some((tool) => tool.type === "image_search");
+      const hasPptOutline = tools.some((tool) => tool.type === "ppt_outline");
+      const hasPptGenerate = tools.some((tool) => tool.type === "ppt_generate");
+
+      if (hasTaskPlan) {
+        setRightPanelType("task_plan");
+      } else if (hasWebSearch) {
+        setRightPanelType("web_search");
+        const webSearchTool = tools.find((tool) => tool.type === "web_search");
+        const rounds = webSearchTool?.data?.searchRounds;
+        const round = rounds && rounds.length > 0 ? rounds[rounds.length - 1]?.round : undefined;
+        if (typeof round === "number") {
+          setCurrentSearchRound(round);
+        }
+      } else if (hasImageSearch) {
+        setRightPanelType("image_search");
+        const imageRound = tools.find((tool) => tool.type === "image_search")?.data?.round;
+        if (typeof imageRound === "number") {
+          setCurrentImageSearchRound(imageRound);
+        }
+      } else if (hasPptOutline) {
+        setRightPanelType("ppt_outline");
+      } else if (hasPptGenerate) {
+        setRightPanelType("ppt_preview");
+      }
+
+      setShowRightPanel(true);
+    };
+
+    const play = async () => {
+      if (!playbackEnabled) {
+        setMessages(fullMessages);
+        return;
+      }
+
+      setMessages([]);
+
+      for (const msg of fullMessages) {
+        if (playbackCancelRef.current) return;
+
+        if (msg.role === "user") {
+          setMessages(prev => [...prev, msg]);
+          await sleep(Math.max(40, Math.round(baseUserDelay / playbackSpeed)));
+          continue;
+        }
+
+        const content = msg.content || "";
+        const hasToolCalls = msg.toolCalls && msg.toolCalls.length > 0;
+
+        if (!content) {
+          setMessages(prev => [...prev, msg]);
+          if (hasToolCalls) {
+            openPanelForToolCalls(msg.toolCalls || []);
+          }
+          await sleep(80);
+          continue;
+        }
+
+        const base: Message = {
+          ...msg,
+          content: "",
+          streaming: true,
+          toolCalls: hasToolCalls ? [] : msg.toolCalls,
+        };
+        setMessages(prev => [...prev, base]);
+
+        const perChunkDelay = Math.max(10, Math.round(baseChunkDelay / playbackSpeed));
+        for (let i = 0; i < content.length; i += chunkSize) {
+          if (playbackCancelRef.current) return;
+          const next = content.slice(i, i + chunkSize);
+          setMessages(prev => {
+            const last = prev[prev.length - 1];
+            if (!last || last.id !== msg.id) return prev;
+            return [
+              ...prev.slice(0, -1),
+              {
+                ...last,
+                content: last.content + next,
+                streaming: i + chunkSize < content.length,
+              },
+            ];
+          });
+          await sleep(perChunkDelay);
+        }
+
+        if (hasToolCalls) {
+          setMessages(prev => {
+            const last = prev[prev.length - 1];
+            if (!last || last.id !== msg.id) return prev;
+            return [
+              ...prev.slice(0, -1),
+              {
+                ...last,
+                toolCalls: msg.toolCalls,
+                streaming: false,
+              },
+            ];
+          });
+          openPanelForToolCalls(msg.toolCalls || []);
+        }
+        await sleep(Math.max(60, Math.round(baseMessageDelay / playbackSpeed)));
+      }
+    };
+
+    play();
+
+    return () => {
+      playbackCancelRef.current = true;
+    };
+  }, [fullMessages, playbackEnabled, playbackSpeed]);
+
   // 自动滚动到底部
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   // 空函数用于只读模式
-  const noopFunction = () => {};
+  const noopFunction = () => { };
 
   const handleOpenPanel = (type: RightPanelType) => {
     setRightPanelType(type);
@@ -366,8 +498,23 @@ export default function ShareView() {
     );
   }
 
+  const stopPlayback = () => {
+    playbackCancelRef.current = true;
+    setPlaybackEnabled(false);
+    setMessages(fullMessages);
+  };
+
+  const togglePlayback = () => {
+    if (playbackEnabled) {
+      stopPlayback();
+    } else {
+      playbackCancelRef.current = true;
+      setPlaybackEnabled(true);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="h-screen bg-background flex flex-col">
       {/* 头部 */}
       <header className="sticky top-0 left-0 right-0 h-16 bg-card border-b z-50 flex items-center justify-between px-6 shadow-sm">
         <div>
@@ -375,7 +522,7 @@ export default function ShareView() {
             {shareData.conversation.title}
           </h1>
           <p className="text-xs text-muted-foreground">
-            由 PPTAgent 生成 · {shareData.share_info.view_count} 次查看
+            由 SlideAgent 生成 · {shareData.share_info.view_count} 次查看
           </p>
         </div>
       </header>
@@ -383,7 +530,7 @@ export default function ShareView() {
       {/* 主内容区域 - 使用与对话页面相同的布局 */}
       <div className="flex-1 flex overflow-hidden">
         {/* 中间聊天区域 */}
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex flex-col min-w-0 relative chat-surface">
           {/* 顶部占位栏 */}
           <div className="h-[58px] shrink-0" />
           {/* 消息列表 */}
@@ -402,9 +549,9 @@ export default function ShareView() {
                   <MessageItem
                     key={message.id}
                     message={message}
-                      onOpenPanel={handleOpenPanel}
-                      onConfirmInfo={noopFunction}
-                      currentTopic={shareData.conversation.title}
+                    onOpenPanel={handleOpenPanel}
+                    onConfirmInfo={noopFunction}
+                    currentTopic={shareData.conversation.title}
                     autoConfirmCountdown={null}
                     onCancelAutoConfirm={noopFunction}
                     isFirstAiMessage={isFirstAiMessage}
@@ -456,10 +603,56 @@ export default function ShareView() {
         />
       </div>
 
-      {/* 底部 */}
-      <footer className="py-6 text-center text-muted-foreground text-sm border-t bg-card">
-        <p>使用 SlideAgent 创建您自己的演示文稿</p>
-      </footer>
+      {/* 底部输入区域（只读） */}
+      <div className="p-4 shrink-0">
+        <div className="max-w-4xl mx-auto">
+          <div className="relative rounded-2xl border border-border bg-muted/50">
+            <textarea
+              disabled
+              value=""
+              placeholder="分享页面仅查看，无法继续对话"
+              className="w-full px-4 py-4 bg-transparent resize-none focus:outline-none min-h-[56px] text-sm text-muted-foreground"
+              rows={1}
+            />
+            <div className="flex items-center justify-between px-4 py-2 border-t border-border/50">
+              <div className="flex items-center gap-2">
+                <div className="h-8 rounded-full px-3 flex items-center gap-2 text-sm bg-background/80 border border-border/50 text-muted-foreground">
+                  <Globe className="h-3.5 w-3.5" />
+                  <span>联网搜索</span>
+                  <span className="text-muted-foreground">· 仅查看</span>
+                </div>
+                <button
+                  disabled
+                  className="p-1.5 hover:bg-muted/80 rounded-lg transition-colors"
+                >
+                  <Paperclip className="h-4 w-4 text-muted-foreground" />
+                </button>
+                <button
+                  onClick={togglePlayback}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {playbackEnabled ? "关闭流式回放" : "开启流式回放"}
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={stopPlayback}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  直接显示最终结果
+                </button>
+                <button
+                  disabled
+                  className="w-8 h-8 rounded-full flex items-center justify-center bg-muted text-muted-foreground"
+                >
+                  <Send className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
