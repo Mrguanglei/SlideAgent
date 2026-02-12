@@ -139,6 +139,48 @@ const TEMPLATES: Template[] = [
   },
 ];
 
+const GREETING_SETS = {
+  morning: [
+    "早上好，今天想做哪类 PPT？",
+    "早安！要不要来个清爽的开场？",
+    "新的一天开始了，准备好做 PPT 吗？",
+    "早上好！把你的想法交给我吧。",
+  ],
+  noon: [
+    "中午好，来个高效的 PPT 规划？",
+    "午间灵感时刻，想做什么主题？",
+    "中午好！要不要快速出一版大纲？",
+    "午安，给我一个方向就能开始。",
+  ],
+  afternoon: [
+    "下午好，继续推进你的 PPT 吧！",
+    "下午好，来点更有冲击力的设计？",
+    "午后时间最适合打磨 PPT 细节。",
+    "下午好！告诉我主题，我来输出。",
+  ],
+  evening: [
+    "晚上好，今晚也要高效产出 PPT。",
+    "夜间灵感正好，来个漂亮的演示？",
+    "晚上好！收尾也能很丝滑。",
+    "夜深了，交给我快速生成吧。",
+  ],
+};
+
+const getGreetingSegment = (hour: number) => {
+  if (hour >= 5 && hour < 11) return "morning";
+  if (hour >= 11 && hour < 14) return "noon";
+  if (hour >= 14 && hour < 18) return "afternoon";
+  return "evening";
+};
+
+const pickGreeting = () => {
+  const hour = new Date().getHours();
+  const segment = getGreetingSegment(hour);
+  const list = GREETING_SETS[segment] || GREETING_SETS.morning;
+  const index = Math.floor(Math.random() * list.length);
+  return list[index] || "嗨，今天有什么我可以帮你的吗？";
+};
+
 const TEMPLATE_CATEGORIES: TemplateCategory[] = ["全部", "科技", "商务", "创意"];
 
 export default function Home() {
@@ -150,6 +192,7 @@ export default function Home() {
 
   // 页面模式
   const [mode, setMode] = useState<"home" | "chat">("home");
+  const [greeting, setGreeting] = useState(() => pickGreeting());
 
   // 侧边栏状态
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -611,6 +654,7 @@ export default function Home() {
       clearInterval(autoConfirmTimerRef.current);
     }
 
+    setGreeting(pickGreeting());
     setMode("home");
     // 导航到新对话页面
     setLocation('/chat');
@@ -1541,8 +1585,8 @@ export default function Home() {
                   <div className="max-w-3xl mx-auto mt-26">
                     {/* 欢迎语 */}
                     <h1 className="text-3xl font-bold mb-8 text-center flex items-center justify-center gap-2">
-                      <span>👋</span>
-                      <span>嗨，今天有什么我可以帮你的吗？</span>
+                      <span className="greeting-emoji">👋</span>
+                      <span className="greeting-title">{greeting}</span>
                     </h1>
 
                     {/* 大输入框 - 智谱清言风格 */}
@@ -1692,75 +1736,75 @@ export default function Home() {
               <ScrollArea className="flex-1 chat-surface">
                 <div className="max-w-4xl mx-auto px-6 pt-0 pb-8">
                   {messages.map((message, index) => {
-                  const isFirstAiMessage =
-                    message.role === "assistant" &&
-                    (index === 0 || messages[index - 1]?.role !== "assistant");
-                  const isFirstUserMessage =
-                    message.role === "user" &&
-                    (index === 0 || messages[index - 1]?.role !== "user");
+                    const isFirstAiMessage =
+                      message.role === "assistant" &&
+                      (index === 0 || messages[index - 1]?.role !== "assistant");
+                    const isFirstUserMessage =
+                      message.role === "user" &&
+                      (index === 0 || messages[index - 1]?.role !== "user");
 
-                  return (
-                    <MessageItem
-                      key={message.id}
-                      message={message}
-                      onOpenPanel={openRightPanel}
-                      onConfirmInfo={handleConfirmInfo}
-                      currentTopic={currentTopic}
-                      autoConfirmCountdown={autoConfirmCountdown}
-                      onCancelAutoConfirm={cancelAutoConfirm}
-                      isFirstAiMessage={isFirstAiMessage}
-                      isFirstUserMessage={isFirstUserMessage}
-                      onSetSearchRound={setCurrentSearchRound}
-                      onSetImageSearchRound={setCurrentImageSearchRound}
-                      onScrollToSlide={handleScrollToSlide}
-                      showThinking={deepThinkingMode}
-                      isLoading={isLoading}
-                    />
-                  );
-                })}
+                    return (
+                      <MessageItem
+                        key={message.id}
+                        message={message}
+                        onOpenPanel={openRightPanel}
+                        onConfirmInfo={handleConfirmInfo}
+                        currentTopic={currentTopic}
+                        autoConfirmCountdown={autoConfirmCountdown}
+                        onCancelAutoConfirm={cancelAutoConfirm}
+                        isFirstAiMessage={isFirstAiMessage}
+                        isFirstUserMessage={isFirstUserMessage}
+                        onSetSearchRound={setCurrentSearchRound}
+                        onSetImageSearchRound={setCurrentImageSearchRound}
+                        onScrollToSlide={handleScrollToSlide}
+                        showThinking={deepThinkingMode}
+                        isLoading={isLoading}
+                      />
+                    );
+                  })}
 
-                {isLoading && messages.length > 0 && messages[messages.length - 1]?.role === "user" && (() => {
-                  const hasAssistant = messages.some(m => m.role === "assistant");
-                  return (
+                  {isLoading && messages.length > 0 && messages[messages.length - 1]?.role === "user" && (() => {
+                    const hasAssistant = messages.some(m => m.role === "assistant");
+                    return (
+                      <div className="mb-6">
+                        {!hasAssistant ? (
+                          // 首次 AI 过渡提示
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-1 -ml-2 min-h-12">
+                              <div className="w-12 h-12 flex items-center justify-center shrink-0">
+                                <AIAvatar isActive offsetX={AI_AVATAR_OFFSET_X} />
+                              </div>
+                              <span className="text-base font-medium text-foreground leading-none">SlideAgent</span>
+                            </div>
+                            <div className="pl-8">
+                              <div className="text-base text-foreground leading-relaxed whitespace-pre-wrap">
+                                <span>让我先核对下本轮任务的目标和重点偏好，正在梳理您的需求~</span>
+                                <span className="inline-flex items-center ml-2 align-middle">
+                                  <span className="w-2 h-2 rounded-full bg-primary animate-pulse align-middle" />
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          // 后续响应：使用加载动画
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-muted-foreground">正在生成中...</span>
+                            <LoadingDots />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* 确认后的加载状态 */}
+                  {isConfirming && (
                     <div className="mb-6">
-                      {!hasAssistant ? (
-                        // 首次 AI 过渡提示
-                        <div className="space-y-1.5">
-                          <div className="flex items-center gap-1 -ml-2 min-h-12">
-                            <div className="w-12 h-12 flex items-center justify-center shrink-0">
-                              <AIAvatar isActive offsetX={AI_AVATAR_OFFSET_X} />
-                            </div>
-                            <span className="text-base font-medium text-foreground leading-none">SlideAgent</span>
-                          </div>
-                          <div className="pl-8">
-                            <div className="text-base text-foreground leading-relaxed whitespace-pre-wrap">
-                              <span>让我先核对下本轮任务的目标和重点偏好，正在梳理您的需求~</span>
-                              <span className="inline-flex items-center ml-2 align-middle">
-                                <span className="w-2 h-2 rounded-full bg-primary animate-pulse align-middle" />
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        // 后续响应：使用加载动画
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-muted-foreground">正在生成中...</span>
-                          <LoadingDots />
-                        </div>
-                      )}
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground">正在生成中...</span>
+                        <LoadingDots />
+                      </div>
                     </div>
-                  );
-                })()}
-
-                {/* 确认后的加载状态 */}
-                {isConfirming && (
-                  <div className="mb-6">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-muted-foreground">正在生成中...</span>
-                      <LoadingDots />
-                    </div>
-                  </div>
-                )}
+                  )}
 
                   <div ref={messagesEndRef} />
                 </div>
@@ -1885,11 +1929,11 @@ export default function Home() {
       </div>
 
       {/* 右侧面板 */}
-        <RightPanel
-          rightPanelType={rightPanelType}
-          setRightPanelType={setRightPanelType}
-          showRightPanel={showRightPanel}
-          setShowRightPanel={setShowRightPanel}
+      <RightPanel
+        rightPanelType={rightPanelType}
+        setRightPanelType={setRightPanelType}
+        showRightPanel={showRightPanel}
+        setShowRightPanel={setShowRightPanel}
         isLoading={isLoading}
         pptHtmlCode={pptHtmlCode}
         pptViewMode={pptViewMode}
@@ -1901,17 +1945,17 @@ export default function Home() {
         targetSlideIndex={targetSlideIndex}
         taskPlan={taskPlan}
         taskPlanStreaming={taskPlanStreaming}
-          searchRounds={searchRounds}
-          currentSearchRound={currentSearchRound}
-          setCurrentSearchRound={setCurrentSearchRound}
-          deepThinking={deepThinking}
-          deepThinkingStreaming={deepThinkingStreaming}
-          imageSearchRounds={imageSearchRounds}
-          currentImageSearchRound={currentImageSearchRound}
-          setCurrentImageSearchRound={setCurrentImageSearchRound}
-          pptOutline={pptOutline}
-          pptOutlineStreaming={pptOutlineStreaming}
-          pptProjects={pptProjects}
+        searchRounds={searchRounds}
+        currentSearchRound={currentSearchRound}
+        setCurrentSearchRound={setCurrentSearchRound}
+        deepThinking={deepThinking}
+        deepThinkingStreaming={deepThinkingStreaming}
+        imageSearchRounds={imageSearchRounds}
+        currentImageSearchRound={currentImageSearchRound}
+        setCurrentImageSearchRound={setCurrentImageSearchRound}
+        pptOutline={pptOutline}
+        pptOutlineStreaming={pptOutlineStreaming}
+        pptProjects={pptProjects}
         onSelectProject={handleSelectProject}
         onDownload={handleDownload}
         onShare={handleShare}
