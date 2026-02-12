@@ -65,6 +65,7 @@ import {
   updateConversation,
   deleteConversation,
   getPPTProjects,
+  getPPTProject,
   uploadFile,
   type UploadResponse,
   type DocumentResponse,
@@ -369,6 +370,49 @@ export default function Home() {
     }
   };
 
+  const waitForNextPaint = () =>
+    new Promise<void>((resolve) => {
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() => resolve());
+      } else {
+        setTimeout(() => resolve(), 0);
+      }
+    });
+
+  const refreshPPTProject = async (
+    projectId: number,
+    options?: { preserveHtml?: boolean }
+  ) => {
+    try {
+      const project = await getPPTProject(projectId);
+      const versions = project.versions || [];
+      const latestVersion = versions[versions.length - 1];
+      const slides = latestVersion?.slides || [];
+      setPptProject({
+        ...project,
+        current_version: latestVersion,
+        slides,
+      } as PPTProject);
+      if (slides.length > 0) {
+        const htmlCode = slides
+          .sort((a: any, b: any) => a.page_number - b.page_number)
+          .map((slide: any) => slide.html_content)
+          .join("\n");
+        setPptHtmlCode(prev => {
+          if (!options?.preserveHtml || !prev) {
+            return htmlCode;
+          }
+          const prevCount = prev
+            .split(/(?=<!DOCTYPE html>)/i)
+            .filter((html: string) => html.trim()).length;
+          return prevCount === slides.length ? prev : htmlCode;
+        });
+      }
+    } catch (error) {
+      console.error("Failed to refresh PPT project:", error);
+    }
+  };
+
   const loadConversation = async (uuid: string) => {
     try {
       const data = await getConversationDetail(uuid);
@@ -394,8 +438,34 @@ export default function Home() {
       setImageSearchRounds([]);
       setCurrentImageSearchRound(1);
 
-      // 恢复消息
-      if (data.messages) {
+      // 优先恢复 PPT 项目，让预览更快出现
+      if (data.ppt_project) {
+        const project = data.ppt_project;
+        setPptProject(project);
+
+        if (project.slides && project.slides.length > 0) {
+          const htmlCode = project.slides
+            .sort((a: any, b: any) => a.page_number - b.page_number)
+            .map((slide: any) => slide.html_content)
+            .join("\n");
+          setPptHtmlCode(htmlCode);
+          console.log("[PPT恢复] 成功恢复", project.slides.length, "张幻灯片");
+        } else {
+          console.warn("[PPT恢复] 未找到幻灯片数据", project);
+          setPptHtmlCode("");
+        }
+
+        setCurrentTopic(project.title);
+      } else {
+        setPptProject(null);
+        setPptHtmlCode("");
+        setCurrentTopic(data.conversation.title);
+      }
+
+      await waitForNextPaint();
+
+      // 恢复消息（避免在流式生成期间覆盖本地消息）
+      if (data.messages && !isStreamingRef.current) {
         const restoredMessages: Message[] = data.messages.map((msg: any) => ({
           id: msg.id.toString(),
           role: msg.role,
@@ -411,31 +481,6 @@ export default function Home() {
           streaming: false, // 恢复的历史消息不应显示"正在生成..."
         }));
         setMessages(restoredMessages);
-      }
-
-      // 恢复 PPT 项目
-      if (data.ppt_project) {
-        const project = data.ppt_project;
-        setPptProject(project);
-
-        // 恢复 PPT HTML 代码
-        // 后端返回的数据结构：project.slides（不是project.versions[].slides）
-        if (project.slides && project.slides.length > 0) {
-          const htmlCode = project.slides
-            .sort((a: any, b: any) => a.page_number - b.page_number)
-            .map((slide: any) => slide.html_content)
-            .join("\n");
-          setPptHtmlCode(htmlCode);
-          console.log("[PPT恢复] 成功恢复", project.slides.length, "张幻灯片");
-        } else {
-          console.warn("[PPT恢复] 未找到幻灯片数据", project);
-        }
-
-        // 使用 PPT 项目标题
-        setCurrentTopic(project.title);
-      } else {
-        // 如果没有 PPT 项目，使用对话标题
-        setCurrentTopic(data.conversation.title);
       }
 
       // 从工具调用中提取任务规划和搜索数据
@@ -525,7 +570,6 @@ export default function Home() {
           }
         }
       }
-
       setMode("chat");
     } catch (error) {
       console.error("Failed to load conversation:", error);
@@ -1025,6 +1069,9 @@ export default function Home() {
       case "ppt_complete":
         if (data.project) {
           setPptProject(data.project);
+          if (data.project.title) {
+            setCurrentTopic(data.project.title);
+          }
           loadPPTProjects();
         }
         break;
@@ -1034,9 +1081,9 @@ export default function Home() {
         setIsLoading(false);
         isStreamingRef.current = false; // 任务完成时重置流式传输状态
         loadConversations();
-        // 刷新当前的对话详情，确保 PPT 项目数据（包括 slides）是最新的，从而开启编辑功能
-        if (currentConversationUuid) {
-          loadConversation(currentConversationUuid);
+        // 刷新 PPT 项目详情（包含 slides），避免整页对话刷新
+        if (pptProject?.id) {
+          refreshPPTProject(pptProject.id, { preserveHtml: true });
         }
 
         // 确保最后一条消息的 streaming 状态被清除
@@ -1068,6 +1115,20 @@ export default function Home() {
     };
 
     setMessages(prev => {
+      const shouldIsolateToolCall = toolCall.type === "ppt_generate";
+      if (shouldIsolateToolCall) {
+        return [
+          ...prev,
+          {
+            id: `assistant-${Date.now()}`,
+            role: "assistant",
+            content: "",
+            timestamp: Date.now(),
+            toolCalls: [toolCall],
+          },
+        ];
+      }
+
       const lastMsg = prev[prev.length - 1];
       if (lastMsg?.role === "assistant") {
         return [
@@ -1192,7 +1253,8 @@ export default function Home() {
     // 处理 PPT 大纲工具
     if (data.tool_type === "ppt_outline") {
       const outlineData = data.data as any;
-      setPptOutline(outlineData.content || "");
+      const outlineContent = outlineData.content || "";
+      setPptOutline(outlineContent);
       openRightPanelDeferred("ppt_outline");
     }
 

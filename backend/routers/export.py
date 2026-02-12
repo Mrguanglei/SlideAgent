@@ -6,8 +6,10 @@ PPTAgent 导出和分享路由模块
 
 import os
 import logging
+import re
 from typing import Optional, List
 from datetime import datetime
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Depends, Response
 from fastapi.responses import FileResponse, HTMLResponse
@@ -22,6 +24,25 @@ from services.share import create_share, get_share, delete_share, get_conversati
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ppt", tags=["export"])
+
+INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\\\|?*\\x00-\\x1F]')
+
+
+def sanitize_filename(title: str, fallback: str) -> str:
+    """Sanitize filename but keep Unicode characters."""
+    base = (title or "").strip()
+    if not base:
+        return fallback
+    base = INVALID_FILENAME_CHARS.sub("_", base)
+    base = re.sub(r"\\s+", " ", base).strip().strip(".")
+    return base[:80] or fallback
+
+
+def build_content_disposition(filename: str) -> str:
+    """RFC 5987 filename* with ASCII fallback for better browser compatibility."""
+    ascii_fallback = re.sub(r"[^\x20-\x7E]+", "_", filename) or "presentation"
+    ascii_fallback = ascii_fallback.replace('"', "_")
+    return f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{quote(filename)}'
 
 
 # ==================== Pydantic Models ====================
@@ -96,14 +117,16 @@ async def export_ppt_file(
         # 提取 HTML 内容
         slides_html = [slide.html_content for slide in sorted(slides, key=lambda s: s.page_number)]
         
-        # 清理标题（用于文件名）- 只保留ASCII字符避免编码问题
-        import re
-        
-        # 移除所有非-ASCII字符，只保留英文字母、数字、空格、连字符和下划线
-        safe_title = re.sub(r'[^a-zA-Z0-9\s\-_]', '', project.title).strip()
-        # 将多个空格替换为单个下划线
-        safe_title = re.sub(r'\s+', '_', safe_title)
-        safe_title = safe_title[:50] or "presentation"
+        format_extension = {
+            "pdf": ".pdf",
+            "html": ".html",
+            "png": ".zip",
+            "images": ".zip",
+            "pptx": ".pptx",
+        }.get(request.format, ".bin")
+        raw_title = project.title or "presentation"
+        safe_title = sanitize_filename(raw_title, "presentation")
+        download_filename = f"{safe_title}{format_extension}"
         
         # 检查缓存
         cached_export = await crud.get_ppt_export(db, version.id, request.format)
@@ -126,7 +149,7 @@ async def export_ppt_file(
                 content=file_data,
                 media_type=media_type_map.get(request.format, "application/octet-stream"),
                 headers={
-                    "Content-Disposition": f'attachment; filename="{filename}"'
+                    "Content-Disposition": build_content_disposition(download_filename)
                 }
             )
         else:
@@ -158,11 +181,11 @@ async def export_ppt_file(
                     version_id=version.id,
                     format=request.format,
                     file_path="",  # 不再需要本地路径
-                    filename=filename,
+                    filename=download_filename,
                     file_size=file_size,
                     file_data=file_data
                 )
-                logger.info(f"Saved export to database: {filename} ({file_size} bytes)")
+                logger.info(f"Saved export to database: {download_filename} ({file_size} bytes)")
             except Exception as e:
                 logger.warning(f"Failed to save export to database: {e}")
             
@@ -179,7 +202,7 @@ async def export_ppt_file(
                 content=file_data,
                 media_type=media_type_map.get(request.format, "application/octet-stream"),
                 headers={
-                    "Content-Disposition": f'attachment; filename="{filename}"'
+                    "Content-Disposition": build_content_disposition(download_filename)
                 }
             )
         

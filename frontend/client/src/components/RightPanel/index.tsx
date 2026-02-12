@@ -108,6 +108,8 @@ export default function RightPanel({
   const pptPreviewScrollRef = useRef<HTMLDivElement>(null);
   const pptCodeScrollRef = useRef<HTMLDivElement>(null);
   const editablePPTRef = useRef<EditablePPTPreviewRef>(null);
+  const pptHeaderTitle =
+    pptProject?.title || currentTopic || "PPT 预览";
 
   // 保存编辑
   const handleSaveEdit = async () => {
@@ -136,7 +138,7 @@ export default function RightPanel({
           {rightPanelType === "ppt_preview" && (
             <>
               <h3 className="font-medium text-sm truncate max-w-[200px]">
-                {pptProject?.title || currentTopic || "PPT 预览"}
+                {pptHeaderTitle}
               </h3>
               <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
                 {versionName}

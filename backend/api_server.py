@@ -54,6 +54,19 @@ def normalize_conversation_title(text: str, max_len: int = 32) -> str:
     return title if title else "新对话"
 
 
+def clean_title_simple(text: str, max_len: int = 32, fallback: str = "未命名") -> str:
+    """轻量清洗标题，不依赖正则。"""
+    if not text:
+        return fallback
+    title = " ".join(str(text).split()).strip()
+    title = title.strip("“”\"'` ")
+    while title and title[0] in "：:，,。. ":
+        title = title[1:].lstrip()
+    if len(title) > max_len:
+        title = title[:max_len].rstrip()
+    return title or fallback
+
+
 async def generate_conversation_title_llm(text: str, max_len: int = 32) -> str:
     """用模型生成简短主题标题，失败时回退规则提取"""
     if not text:
@@ -78,6 +91,42 @@ async def generate_conversation_title_llm(text: str, max_len: int = 32) -> str:
 
     fallback = extract_core_topic(text)
     return normalize_conversation_title(fallback, max_len=max_len)
+
+
+async def generate_ppt_title_llm(
+    instruction: str,
+    outline_content: str = "",
+    supplement_topic: str = "",
+    max_len: int = 32
+) -> str:
+    """用模型生成 PPT 标题，失败时回退到用户指令/补充主题。"""
+    parts: List[str] = []
+    if supplement_topic:
+        parts.append(f"补充主题：{supplement_topic}")
+    if outline_content:
+        outline_snippet = outline_content[:1200]
+        parts.append(f"PPT 大纲：\n{outline_snippet}")
+    if instruction:
+        parts.append(f"用户需求：{instruction}")
+    context = "\n".join(parts)
+    prompt = f"""请根据以下信息生成一个简短、明确的PPT标题。
+- 只输出标题，不要解释
+- 不要包含“PPT/演示文稿/幻灯片/帮我/请”等指令词
+- 尽量≤{max_len}个字
+{context}
+"""
+    try:
+        response = await call_llm_api([
+            {"role": "system", "content": "你是标题提炼助手，只输出标题。"},
+            {"role": "user", "content": prompt},
+        ])
+        title = clean_title_simple(response or "", max_len=max_len, fallback="")
+        if title:
+            return title
+    except Exception as e:
+        logger.warning(f"Failed to generate PPT title with LLM: {e}")
+    fallback = supplement_topic or instruction or "未命名"
+    return clean_title_simple(fallback, max_len=max_len, fallback="未命名")
 
 # 导入配置
 from utils.config import Config
@@ -907,8 +956,17 @@ async def stream_ppt_generation(
         ppt_version = None
         if db and conversation_id:
             try:
+                supplement_topic = session.get("supplement_data", {}).get("topic", "")
+                outline_content = session.get("outline_content", "")
+                project_title = session.get("ppt_title") or await generate_ppt_title_llm(
+                    instruction=instruction,
+                    outline_content=outline_content,
+                    supplement_topic=supplement_topic,
+                    max_len=32
+                )
+                session["ppt_title"] = project_title
                 ppt_project = await crud.create_ppt_project(
-                    db, conversation_id, instruction, session["outline_content"]
+                    db, conversation_id, project_title, outline_content
                 )
                 ppt_version = await crud.create_ppt_version(
                     db, ppt_project.id, 1, "V1"
@@ -1025,7 +1083,7 @@ async def stream_ppt_generation(
                     'type': 'message',
                     'role': 'assistant',
                     'content': event["content"],
-                    'streaming': True
+                    'streaming': False
                 }
                 yield f"data: {json.dumps(thinking_data, ensure_ascii=False)}\n\n"
             

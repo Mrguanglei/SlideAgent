@@ -51,6 +51,28 @@ const EXPORT_FORMATS: ExportFormat[] = [
   }
 ];
 
+const extractFilename = (contentDisposition: string | null, fallback: string) => {
+  if (!contentDisposition) return fallback;
+  const filenameStarMatch = contentDisposition.match(/filename\*\s*=\s*([^;]+)/i);
+  if (filenameStarMatch?.[1]) {
+    const value = filenameStarMatch[1].trim().replace(/^"|"$/g, "");
+    const parts = value.split("''");
+    const encoded = parts.length > 1 ? parts.slice(1).join("''") : value;
+    try {
+      const decoded = decodeURIComponent(encoded);
+      if (decoded) return decoded;
+    } catch {
+      // Fall back to filename= or default.
+    }
+  }
+  const filenameMatch = contentDisposition.match(/filename\s*=\s*([^;]+)/i);
+  if (filenameMatch?.[1]) {
+    const value = filenameMatch[1].trim().replace(/^"|"$/g, "");
+    if (value) return value;
+  }
+  return fallback;
+};
+
 export default function DownloadModal({
   isOpen,
   onClose,
@@ -86,13 +108,8 @@ export default function DownloadModal({
 
       // 获取文件名
       const contentDisposition = response.headers.get("Content-Disposition");
-      let filename = `${title}${EXPORT_FORMATS.find(f => f.id === selectedFormat)?.extension || ""}`;
-      if (contentDisposition) {
-        const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-        if (match) {
-          filename = match[1].replace(/['"]/g, "");
-        }
-      }
+      const fallback = `${title}${EXPORT_FORMATS.find(f => f.id === selectedFormat)?.extension || ""}`;
+      const filename = extractFilename(contentDisposition, fallback);
 
       // 下载文件
       const blob = await response.blob();

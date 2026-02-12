@@ -50,6 +50,31 @@ function ExportItem({ id, name, icon, iconBgInfo, onDownload, isLoading, extraIn
     );
 }
 
+const extractFilename = (contentDisposition: string | null, fallback: string) => {
+    if (!contentDisposition) return fallback;
+
+    const filenameStarMatch = contentDisposition.match(/filename\*\s*=\s*([^;]+)/i);
+    if (filenameStarMatch && filenameStarMatch[1]) {
+        const value = filenameStarMatch[1].trim().replace(/^\"|\"$/g, "");
+        const parts = value.split("''");
+        const encoded = parts.length > 1 ? parts.slice(1).join("''") : value;
+        try {
+            const decoded = decodeURIComponent(encoded);
+            if (decoded) return decoded;
+        } catch {
+            // ignore decode errors
+        }
+    }
+
+    const filenameMatch = contentDisposition.match(/filename\s*=\s*([^;]+)/i);
+    if (filenameMatch && filenameMatch[1]) {
+        const value = filenameMatch[1].trim().replace(/^\"|\"$/g, "");
+        if (value) return value;
+    }
+
+    return fallback;
+};
+
 export default function DownloadPopover({ projectId, versionId, title, disabled }: DownloadPopoverProps) {
     const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
 
@@ -74,13 +99,8 @@ export default function DownloadPopover({ projectId, versionId, title, disabled 
 
             // 获取文件名
             const contentDisposition = response.headers.get("Content-Disposition");
-            let filename = `${title}${extension}`;
-            if (contentDisposition) {
-                const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-                if (match) {
-                    filename = match[1].replace(/['"]/g, "");
-                }
-            }
+            const fallbackName = `${title}${extension}`;
+            const filename = extractFilename(contentDisposition, fallbackName);
 
             // 下载文件
             const blob = await response.blob();

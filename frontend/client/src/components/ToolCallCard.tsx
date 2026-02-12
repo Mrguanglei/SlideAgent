@@ -579,7 +579,12 @@ export default function ToolCallCard({
         // 过滤掉 think 标签内容
         const rawSlideTitle =
           slideData.description || slideData.title || slideData.topic || topic;
-        const slideTitle = rawSlideTitle.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/<think>[\s\S]*$/gi, '').trim();
+        const cleanedTitle = rawSlideTitle
+          .replace(/<think>[\s\S]*?<\/think>/gi, '')
+          .replace(/<think>[\s\S]*$/gi, '')
+          .trim();
+        const fallbackTitle = slideData.pageNumber ? `第 ${slideData.pageNumber} 页` : "新增页面";
+        const slideTitle = cleanedTitle || fallbackTitle;
         const slideIndex = (slideData.pageNumber || 1) - 1;
         return (
           <button

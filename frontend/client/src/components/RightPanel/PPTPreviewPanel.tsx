@@ -1,4 +1,4 @@
-import { useRef, useEffect, RefObject } from "react";
+import { useRef, useEffect, useState, RefObject } from "react";
 import { Loader2 } from "lucide-react";
 import type { PPTViewMode, PPTProject } from "@/types";
 import EditablePPTPreview, { type EditablePPTPreviewRef } from "./EditablePPTPreview";
@@ -28,6 +28,9 @@ export default function PPTPreviewPanel({
 }: PPTPreviewPanelProps) {
   const slideRefsPreview = useRef<(HTMLDivElement | null)[]>([]);
   const slideRefsCode = useRef<(HTMLDivElement | null)[]>([]);
+  const loadedSlidesRef = useRef<Set<number>>(new Set());
+  const [loadedSlidesCount, setLoadedSlidesCount] = useState(0);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
   // 当 targetSlideIndex 改变时，滚动到对应的幻灯片
   useEffect(() => {
@@ -102,6 +105,62 @@ export default function PPTPreviewPanel({
   // 获取 slides 数据 - 优先从 current_version.slides，否则从 project.slides
   const slides = pptProject?.current_version?.slides || (pptProject as any)?.slides;
   const hasSlides = slides && slides.length > 0;
+  const slidesFromProject = hasSlides
+    ? [...slides]
+        .sort((a: any, b: any) => a.page_number - b.page_number)
+        .map((slide: any) => slide.html_content)
+    : [];
+  const slidesFromHtml = pptHtmlCode
+    ? pptHtmlCode
+        .split(/(?=<!DOCTYPE html>)/i)
+        .filter((html: string) => html.trim())
+    : [];
+  // 优先使用流式拼接的 HTML，避免完成阶段切换导致空白闪烁
+  const slidesHtml = slidesFromHtml.length > 0 ? slidesFromHtml : slidesFromProject;
+  const isEmptySlides = slidesHtml.length === 0;
+  const isLoadingSlides =
+    pptViewMode === "preview" &&
+    !isEditMode &&
+    !isEmptySlides &&
+    loadedSlidesCount < slidesHtml.length;
+
+  useEffect(() => {
+    loadedSlidesRef.current.clear();
+    setLoadedSlidesCount(0);
+  }, [pptHtmlCode, pptProject, pptViewMode, isEditMode]);
+
+  const copyToClipboard = async (text: string, index: number) => {
+    const fallbackCopy = () => {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      textarea.style.pointerEvents = "none";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    };
+
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        fallbackCopy();
+      }
+      setCopiedIndex(index);
+      window.setTimeout(() => setCopiedIndex(null), 1200);
+    } catch {
+      try {
+        fallbackCopy();
+        setCopiedIndex(index);
+        window.setTimeout(() => setCopiedIndex(null), 1200);
+      } catch {
+        // Ignore copy failures silently
+      }
+    }
+  };
 
   // 调试日志
   console.log('[PPTPreviewPanel] 状态:', {
@@ -136,12 +195,9 @@ export default function PPTPreviewPanel({
               {console.log('❌ 渲染普通预览')}
               {/* PPT 预览区域 - 垂直流式排列 */}
               <div className="p-8 space-y-8">
-                {pptHtmlCode ? (
+                {!isEmptySlides ? (
                   <>
                     {(() => {
-                      const slidesHtml = pptHtmlCode
-                        .split(/(?=<!DOCTYPE html>)/i)
-                        .filter((html: string) => html.trim());
                       slideRefsPreview.current = [];
 
                       return slidesHtml.map((slide: string, idx: number) => {
@@ -179,6 +235,14 @@ export default function PPTPreviewPanel({
                                 height: `${scaledHeight}px`,
                               }}
                             >
+                              {isLoadingSlides && !loadedSlidesRef.current.has(idx) && (
+                                <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/80 backdrop-blur-sm">
+                                  <div className="text-sm text-muted-foreground text-center">
+                                    <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+                                    正在加载 PPT...
+                                  </div>
+                                </div>
+                              )}
                               <iframe
                                 key={`preview-${idx}-${pptViewMode}`}
                                 srcDoc={processedSlide}
@@ -186,6 +250,12 @@ export default function PPTPreviewPanel({
                                 title={`Slide ${idx + 1}`}
                                 sandbox="allow-same-origin allow-scripts"
                                 scrolling="no"
+                                onLoad={() => {
+                                  if (!loadedSlidesRef.current.has(idx)) {
+                                    loadedSlidesRef.current.add(idx);
+                                    setLoadedSlidesCount(loadedSlidesRef.current.size);
+                                  }
+                                }}
                                 style={{
                                   width: `${slideWidth}px`,
                                   height: `${slideHeight}px`,
@@ -207,7 +277,7 @@ export default function PPTPreviewPanel({
                   <div className="flex items-center justify-center h-[60vh]">
                     <div className="text-sm text-muted-foreground text-center">
                       <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
-                      正在生成 PPT...
+                      正在加载 PPT...
                     </div>
                   </div>
                 )}
@@ -219,12 +289,9 @@ export default function PPTPreviewPanel({
         <>
           {/* 代码区域 - 分页显示代码块 */}
           <div className="p-6 space-y-6">
-            {pptHtmlCode ? (
+            {!isEmptySlides ? (
               <>
                 {(() => {
-                  const slidesHtml = pptHtmlCode
-                    .split(/(?=<!DOCTYPE html>)/i)
-                    .filter((html: string) => html.trim());
                   const containerWidth = 836;
                   const slideHeight = 470.25;
                   slideRefsCode.current = [];
@@ -249,11 +316,11 @@ export default function PPTPreviewPanel({
                         </div>
                         <button
                           onClick={() => {
-                            navigator.clipboard.writeText(slide);
+                            copyToClipboard(slide, idx);
                           }}
                           className="text-[10px] text-primary hover:underline font-medium"
                         >
-                          复制代码
+                          {copiedIndex === idx ? "已复制" : "复制代码"}
                         </button>
                       </div>
 
