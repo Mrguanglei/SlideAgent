@@ -394,7 +394,31 @@ async def run_slide_design_agent(
                     skip_content = False
                     if content_text:
                         # 过滤特定模式的消息
-                        skip_patterns = ["File downloaded", "Outcome file", "does not exist", "resolution:", "Todo ", "DeepPresenter running"]
+                        skip_patterns = [
+                            "File downloaded",
+                            "Outcome file",
+                            "does not exist",
+                            "resolution:",
+                            "Todo ",
+                            "DeepPresenter running",
+                            "File written to",
+                            "manuscript.md",
+                            "markdown",
+                            "playwright",
+                            "BrowserType.launch",
+                            "chromium",
+                            "chrome-headless-shell",
+                            "playwright install",
+                            "PPT not initialized",
+                            "initialize_design",
+                            "get_slides_summary",
+                            "backend-",
+                            "httpx - INFO",
+                            "INFO - HTTP Request",
+                            "DeprecationWarning",
+                            "Tool already exists",
+                            "Config file",
+                        ]
                         for pattern in skip_patterns:
                             if pattern in content_text:
                                 skip_content = True
@@ -407,7 +431,7 @@ async def run_slide_design_agent(
                                 try:
                                     json.loads(stripped)
                                     # 如果是有效的 JSON，检查是否包含 MCP 工具响应的特征字段
-                                    if any(key in stripped for key in ['"message":', '"details":', '"next_steps":', '"progress":', '"html_file":']):
+                                    if any(key in stripped for key in ['"message":', '"details":', '"next_steps":', '"progress":', '"html_file":', '"error":', '"errors":']):
                                         skip_content = True
                                         logger.info(f"Skipping MCP tool JSON response: {stripped[:100]}...")
                                 except:

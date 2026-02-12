@@ -25,6 +25,7 @@ import {
   Pause,
   Database,
   Brain,
+  Globe,
 } from "lucide-react";
 
 // 组件导入
@@ -40,6 +41,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from "@/components/ui/select";
 import { KnowledgeBaseSelector } from "@/components/KnowledgeBaseSelector";
 
 // 类型导入
@@ -183,6 +190,17 @@ const pickGreeting = () => {
 
 const TEMPLATE_CATEGORIES: TemplateCategory[] = ["全部", "科技", "商务", "创意"];
 
+const SEARCH_MODE_OPTIONS = [
+  { value: "auto", label: "自动", description: "自动判断联网获取信息" },
+  { value: "on", label: "开启联网", description: "始终联网获取信息" },
+  { value: "off", label: "关闭", description: "不再联网获取信息" },
+] as const;
+
+const getSearchModeLabel = (value: "auto" | "on" | "off") => {
+  const found = SEARCH_MODE_OPTIONS.find(item => item.value === value);
+  return found?.label || "自动";
+};
+
 export default function Home() {
   // ==================== 路由 ====================
   const params = useParams<{ conversationId?: string }>();
@@ -312,6 +330,7 @@ export default function Home() {
 
   // 深度思考模式状态
   const [deepThinkingMode, setDeepThinkingMode] = useState(false);
+  const [searchMode, setSearchMode] = useState<"auto" | "on" | "off">("auto");
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -398,7 +417,19 @@ export default function Home() {
   const loadConversations = async () => {
     try {
       const data = await getConversations();
-      setConversations(data);
+      const sorted = [...data].sort((a, b) => {
+        const aPinned = (a as any).pinned ? 1 : 0;
+        const bPinned = (b as any).pinned ? 1 : 0;
+        if (aPinned !== bPinned) return bPinned - aPinned;
+        const aRunning = a.task_status === "running" ? 1 : 0;
+        const bRunning = b.task_status === "running" ? 1 : 0;
+        if (aRunning !== bRunning) return bRunning - aRunning;
+        const aUpdated = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+        const bUpdated = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+        if (aUpdated !== bUpdated) return bUpdated - aUpdated;
+        return (b.id || 0) - (a.id || 0);
+      });
+      setConversations(sorted);
     } catch (error) {
       console.error("Failed to load conversations:", error);
     }
@@ -466,6 +497,9 @@ export default function Home() {
       if (data.session_id) {
         console.log(`[loadConversation] Setting session_id: ${data.session_id}`);
         setCurrentSessionId(data.session_id);
+      }
+      if (data.search_mode === "auto" || data.search_mode === "on" || data.search_mode === "off") {
+        setSearchMode(data.search_mode);
       }
 
       // 根据 task_status 设置 isLoading 状态
@@ -649,6 +683,7 @@ export default function Home() {
     setShowRightPanel(false);
     setRightPanelType(null);
     setAutoConfirmCountdown(null);
+    setSearchMode("auto");
 
     if (autoConfirmTimerRef.current) {
       clearInterval(autoConfirmTimerRef.current);
@@ -708,6 +743,9 @@ export default function Home() {
           const aPinned = (a as any).pinned ? 1 : 0;
           const bPinned = (b as any).pinned ? 1 : 0;
           if (aPinned !== bPinned) return bPinned - aPinned;
+          const aRunning = a.task_status === "running" ? 1 : 0;
+          const bRunning = b.task_status === "running" ? 1 : 0;
+          if (aRunning !== bRunning) return bRunning - aRunning;
           return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
         });
       });
@@ -739,9 +777,22 @@ export default function Home() {
     // 更新当前对话的任务状态为 running
     if (currentConversationId) {
       setConversations(prev =>
-        prev.map(c =>
-          c.id === currentConversationId ? { ...c, task_status: "running" as const } : c
-        )
+        [...prev]
+          .map(c =>
+            c.id === currentConversationId ? { ...c, task_status: "running" as const } : c
+          )
+          .sort((a, b) => {
+            const aPinned = (a as any).pinned ? 1 : 0;
+            const bPinned = (b as any).pinned ? 1 : 0;
+            if (aPinned !== bPinned) return bPinned - aPinned;
+            const aRunning = a.task_status === "running" ? 1 : 0;
+            const bRunning = b.task_status === "running" ? 1 : 0;
+            if (aRunning !== bRunning) return bRunning - aRunning;
+            const aUpdated = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+            const bUpdated = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+            if (aUpdated !== bUpdated) return bUpdated - aUpdated;
+            return (b.id || 0) - (a.id || 0);
+          })
       );
     }
 
@@ -770,6 +821,7 @@ export default function Home() {
           conversation_id: currentConversationId,
           attachments: currentAttachments.length > 0 ? currentAttachments : undefined,
           deep_thinking_mode: deepThinkingMode,
+          search_mode: searchMode,
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -781,6 +833,7 @@ export default function Home() {
           instruction: userMessage.content,
           conversation_id: currentConversationId,
           deep_thinking_mode: deepThinkingMode,
+          search_mode: searchMode,
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -941,7 +994,7 @@ export default function Home() {
         setTaskPlanStreaming(true);
         openRightPanelDeferred("task_plan");
         setTaskPlan(prev => ({
-          ...prev,
+          ...(prev || {}),
           streamContent: (prev?.streamContent || "") + data.content,
         }));
         break;
@@ -1382,6 +1435,7 @@ export default function Home() {
           session_id: currentSessionIdRef.current,
           conversation_id: currentConversationIdRef.current,
           supplement_data: selectedData,
+          search_mode: searchMode,
         }),
       });
 
@@ -1623,7 +1677,7 @@ export default function Home() {
                       {/* 底部工具栏 */}
                       <div className="flex items-center justify-between px-4 py-3 border-t border-border/50">
                         {/* 左侧按钮 */}
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-3">
                           <Popover open={homePopoverOpen} onOpenChange={setHomePopoverOpen}>
                             <PopoverTrigger asChild>
                               <button className="p-2 hover:bg-muted rounded-lg transition-colors">
@@ -1649,7 +1703,32 @@ export default function Home() {
                               </div>
                             </PopoverContent>
                           </Popover>
-
+                          <Select
+                            value={searchMode}
+                            onValueChange={(value) => {
+                              if (value === "auto" || value === "on" || value === "off") {
+                                setSearchMode(value);
+                              }
+                            }}
+                          >
+                            <SelectTrigger size="sm" className="h-8 rounded-full px-3">
+                              <div className="flex items-center gap-2 text-sm">
+                                <Globe className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span>联网搜索</span>
+                                <span className="text-muted-foreground">· {getSearchModeLabel(searchMode)}</span>
+                              </div>
+                            </SelectTrigger>
+                            <SelectContent align="start" className="min-w-[240px]">
+                              {SEARCH_MODE_OPTIONS.map(option => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  <div className="flex flex-col gap-0.5 text-left">
+                                    <span className="text-sm">{option.label}</span>
+                                    <span className="text-xs text-muted-foreground">{option.description}</span>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
 
                         {/* 右侧发送按钮 */}
@@ -1736,75 +1815,75 @@ export default function Home() {
               <ScrollArea className="flex-1 chat-surface">
                 <div className="max-w-4xl mx-auto px-6 pt-0 pb-8">
                   {messages.map((message, index) => {
-                    const isFirstAiMessage =
-                      message.role === "assistant" &&
-                      (index === 0 || messages[index - 1]?.role !== "assistant");
-                    const isFirstUserMessage =
-                      message.role === "user" &&
-                      (index === 0 || messages[index - 1]?.role !== "user");
+                  const isFirstAiMessage =
+                    message.role === "assistant" &&
+                    (index === 0 || messages[index - 1]?.role !== "assistant");
+                  const isFirstUserMessage =
+                    message.role === "user" &&
+                    (index === 0 || messages[index - 1]?.role !== "user");
 
-                    return (
-                      <MessageItem
-                        key={message.id}
-                        message={message}
-                        onOpenPanel={openRightPanel}
-                        onConfirmInfo={handleConfirmInfo}
-                        currentTopic={currentTopic}
-                        autoConfirmCountdown={autoConfirmCountdown}
-                        onCancelAutoConfirm={cancelAutoConfirm}
-                        isFirstAiMessage={isFirstAiMessage}
-                        isFirstUserMessage={isFirstUserMessage}
-                        onSetSearchRound={setCurrentSearchRound}
-                        onSetImageSearchRound={setCurrentImageSearchRound}
-                        onScrollToSlide={handleScrollToSlide}
-                        showThinking={deepThinkingMode}
-                        isLoading={isLoading}
-                      />
-                    );
-                  })}
+                  return (
+                    <MessageItem
+                      key={message.id}
+                      message={message}
+                      onOpenPanel={openRightPanel}
+                      onConfirmInfo={handleConfirmInfo}
+                      currentTopic={currentTopic}
+                      autoConfirmCountdown={autoConfirmCountdown}
+                      onCancelAutoConfirm={cancelAutoConfirm}
+                      isFirstAiMessage={isFirstAiMessage}
+                      isFirstUserMessage={isFirstUserMessage}
+                      onSetSearchRound={setCurrentSearchRound}
+                      onSetImageSearchRound={setCurrentImageSearchRound}
+                      onScrollToSlide={handleScrollToSlide}
+                      showThinking={deepThinkingMode}
+                      isLoading={isLoading}
+                    />
+                  );
+                })}
 
-                  {isLoading && messages.length > 0 && messages[messages.length - 1]?.role === "user" && (() => {
-                    const hasAssistant = messages.some(m => m.role === "assistant");
-                    return (
-                      <div className="mb-6">
-                        {!hasAssistant ? (
-                          // 首次 AI 过渡提示
-                          <div className="space-y-1.5">
-                            <div className="flex items-center gap-1 -ml-2 min-h-12">
-                              <div className="w-12 h-12 flex items-center justify-center shrink-0">
-                                <AIAvatar isActive offsetX={AI_AVATAR_OFFSET_X} />
-                              </div>
-                              <span className="text-base font-medium text-foreground leading-none">SlideAgent</span>
-                            </div>
-                            <div className="pl-8">
-                              <div className="text-base text-foreground leading-relaxed whitespace-pre-wrap">
-                                <span>让我先核对下本轮任务的目标和重点偏好，正在梳理您的需求~</span>
-                                <span className="inline-flex items-center ml-2 align-middle">
-                                  <span className="w-2 h-2 rounded-full bg-primary animate-pulse align-middle" />
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          // 后续响应：使用加载动画
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm text-muted-foreground">正在生成中...</span>
-                            <LoadingDots />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                  {/* 确认后的加载状态 */}
-                  {isConfirming && (
+                {isLoading && messages.length > 0 && messages[messages.length - 1]?.role === "user" && (() => {
+                  const hasAssistant = messages.some(m => m.role === "assistant");
+                  return (
                     <div className="mb-6">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-muted-foreground">正在生成中...</span>
-                        <LoadingDots />
-                      </div>
+                      {!hasAssistant ? (
+                        // 首次 AI 过渡提示
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-1 -ml-2 min-h-12">
+                            <div className="w-12 h-12 flex items-center justify-center shrink-0">
+                              <AIAvatar isActive offsetX={AI_AVATAR_OFFSET_X} />
+                            </div>
+                            <span className="text-base font-medium text-foreground leading-none">SlideAgent</span>
+                          </div>
+                          <div className="pl-8">
+                            <div className="text-base text-foreground leading-relaxed whitespace-pre-wrap">
+                              <span>让我先核对下本轮任务的目标和重点偏好，正在梳理您的需求~</span>
+                              <span className="inline-flex items-center ml-2 align-middle">
+                                <span className="w-2 h-2 rounded-full bg-primary animate-pulse align-middle" />
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        // 后续响应：使用加载动画
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-muted-foreground">正在生成中...</span>
+                          <LoadingDots />
+                        </div>
+                      )}
                     </div>
-                  )}
+                  );
+                })()}
+
+                {/* 确认后的加载状态 */}
+                {isConfirming && (
+                  <div className="mb-6">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-muted-foreground">正在生成中...</span>
+                      <LoadingDots />
+                    </div>
+                  </div>
+                )}
 
                   <div ref={messagesEndRef} />
                 </div>
@@ -1842,85 +1921,112 @@ export default function Home() {
                   onCompositionEnd={chatComposition.onCompositionEnd}
                   onKeyDown={chatComposition.onKeyDown}
                   placeholder="想调整内容、样式或风格等吗，直接告诉我吧"
-                  className="w-full px-4 py-4 pr-32 bg-transparent resize-none focus:outline-none min-h-[56px] max-h-[200px] text-sm"
+                  className="w-full px-4 py-4 bg-transparent resize-none focus:outline-none min-h-[56px] max-h-[200px] text-sm"
                   rows={1}
                 />
-
-                <div className="absolute right-3 bottom-2 flex items-center gap-2">
-                  <Popover open={chatPopoverOpen} onOpenChange={setChatPopoverOpen}>
-                    <PopoverTrigger asChild>
-                      <button className="p-1.5 hover:bg-muted/80 rounded-lg transition-colors">
-                        <Paperclip className="h-4 w-4 text-muted-foreground" />
-                      </button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-48 p-0" align="start">
-                      <div className="flex flex-col">
-                        <button
-                          onClick={() => setShowKbSelector(true)}
-                          className="flex items-center gap-2 px-4 py-2 hover:bg-muted text-sm text-left transition-colors"
-                        >
-                          <Database className="h-4 w-4" />
-                          <span>云知识库选择</span>
-                        </button>
-                        <button
-                          onClick={() => fileInputRef.current?.click()}
-                          className="flex items-center gap-2 px-4 py-2 hover:bg-muted text-sm text-left transition-colors"
-                        >
-                          <Paperclip className="h-4 w-4" />
-                          <span>本地文件选择</span>
-                        </button>
+                <div className="flex items-center justify-between px-4 py-2 border-t border-border/50">
+                  <Select
+                    value={searchMode}
+                    onValueChange={(value) => {
+                      if (value === "auto" || value === "on" || value === "off") {
+                        setSearchMode(value);
+                      }
+                    }}
+                  >
+                    <SelectTrigger size="sm" className="h-8 rounded-full px-3">
+                      <div className="flex items-center gap-2 text-sm">
+                        <Globe className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span>联网搜索</span>
+                        <span className="text-muted-foreground">· {getSearchModeLabel(searchMode)}</span>
                       </div>
-                    </PopoverContent>
-                  </Popover>
+                    </SelectTrigger>
+                    <SelectContent align="start" className="min-w-[240px]">
+                      {SEARCH_MODE_OPTIONS.map(option => (
+                        <SelectItem key={option.value} value={option.value}>
+                          <div className="flex flex-col gap-0.5 text-left">
+                            <span className="text-sm">{option.label}</span>
+                            <span className="text-xs text-muted-foreground">{option.description}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
 
+                  <div className="flex items-center gap-2">
+                    <Popover open={chatPopoverOpen} onOpenChange={setChatPopoverOpen}>
+                      <PopoverTrigger asChild>
+                        <button className="p-1.5 hover:bg-muted/80 rounded-lg transition-colors">
+                          <Paperclip className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-48 p-0" align="start">
+                        <div className="flex flex-col">
+                          <button
+                            onClick={() => setShowKbSelector(true)}
+                            className="flex items-center gap-2 px-4 py-2 hover:bg-muted text-sm text-left transition-colors"
+                          >
+                            <Database className="h-4 w-4" />
+                            <span>云知识库选择</span>
+                          </button>
+                          <button
+                            onClick={() => fileInputRef.current?.click()}
+                            className="flex items-center gap-2 px-4 py-2 hover:bg-muted text-sm text-left transition-colors"
+                          >
+                            <Paperclip className="h-4 w-4" />
+                            <span>本地文件选择</span>
+                          </button>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
 
-                  {/* 发送或暂停按钮 - 圆形设计 */}
-                  {isLoading ? (
-                    <button
-                      onClick={async () => {
-                        // 调用暂停 API
-                        if (currentSessionId) {
-                          try {
-                            await fetch(`/api/sessions/${currentSessionId}/pause`, {
-                              method: "POST",
-                            });
-                            // 中止当前请求
-                            if (abortControllerRef.current) {
-                              abortControllerRef.current.abort();
+                    {/* 发送或暂停按钮 - 圆形设计 */}
+                    {isLoading ? (
+                      <button
+                        onClick={async () => {
+                          // 调用暂停 API
+                          if (currentSessionId) {
+                            try {
+                              await fetch(`/api/sessions/${currentSessionId}/pause`, {
+                                method: "POST",
+                              });
+                              // 中止当前请求
+                              if (abortControllerRef.current) {
+                                abortControllerRef.current.abort();
+                              }
+                              setIsLoading(false);
+                              // 更新对话状态
+                              if (currentConversationId) {
+                                setConversations(prev =>
+                                  prev.map(c =>
+                                    c.id === currentConversationId ? { ...c, task_status: "paused" as const } : c
+                                  )
+                                );
+                              }
+                            } catch (e) {
+                              console.error("Pause failed:", e);
                             }
-                            setIsLoading(false);
-                            // 更新对话状态
-                            if (currentConversationId) {
-                              setConversations(prev =>
-                                prev.map(c =>
-                                  c.id === currentConversationId ? { ...c, task_status: "paused" as const } : c
-                                )
-                              );
-                            }
-                          } catch (e) {
-                            console.error("Pause failed:", e);
                           }
-                        }
-                      }}
-                      className="w-8 h-8 rounded-full flex items-center justify-center transition-colors bg-orange-500 text-white hover:bg-orange-600"
-                      title="暂停任务"
-                    >
-                      <Pause className="h-4 w-4" />
-                    </button>
-                  ) : (
-                    <button
-                      onClick={handleSendMessage}
-                      disabled={!inputValue.trim()}
-                      className={cn(
-                        "w-8 h-8 rounded-full flex items-center justify-center transition-colors",
-                        inputValue.trim()
-                          ? "bg-primary text-white hover:bg-primary/90"
-                          : "bg-muted text-muted-foreground"
-                      )}
-                    >
-                      <Send className="h-4 w-4" />
-                    </button>
-                  )}
+                        }}
+                        className="w-8 h-8 rounded-full flex items-center justify-center transition-colors bg-orange-500 text-white hover:bg-orange-600"
+                        title="暂停任务"
+                      >
+                        <Pause className="h-4 w-4" />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={handleSendMessage}
+                        disabled={!inputValue.trim()}
+                        className={cn(
+                          "w-8 h-8 rounded-full flex items-center justify-center transition-colors",
+                          inputValue.trim()
+                            ? "bg-primary text-white hover:bg-primary/90"
+                            : "bg-muted text-muted-foreground"
+                        )}
+                      >
+                        <Send className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1929,11 +2035,11 @@ export default function Home() {
       </div>
 
       {/* 右侧面板 */}
-      <RightPanel
-        rightPanelType={rightPanelType}
-        setRightPanelType={setRightPanelType}
-        showRightPanel={showRightPanel}
-        setShowRightPanel={setShowRightPanel}
+        <RightPanel
+          rightPanelType={rightPanelType}
+          setRightPanelType={setRightPanelType}
+          showRightPanel={showRightPanel}
+          setShowRightPanel={setShowRightPanel}
         isLoading={isLoading}
         pptHtmlCode={pptHtmlCode}
         pptViewMode={pptViewMode}
@@ -1945,17 +2051,17 @@ export default function Home() {
         targetSlideIndex={targetSlideIndex}
         taskPlan={taskPlan}
         taskPlanStreaming={taskPlanStreaming}
-        searchRounds={searchRounds}
-        currentSearchRound={currentSearchRound}
-        setCurrentSearchRound={setCurrentSearchRound}
-        deepThinking={deepThinking}
-        deepThinkingStreaming={deepThinkingStreaming}
-        imageSearchRounds={imageSearchRounds}
-        currentImageSearchRound={currentImageSearchRound}
-        setCurrentImageSearchRound={setCurrentImageSearchRound}
-        pptOutline={pptOutline}
-        pptOutlineStreaming={pptOutlineStreaming}
-        pptProjects={pptProjects}
+          searchRounds={searchRounds}
+          currentSearchRound={currentSearchRound}
+          setCurrentSearchRound={setCurrentSearchRound}
+          deepThinking={deepThinking}
+          deepThinkingStreaming={deepThinkingStreaming}
+          imageSearchRounds={imageSearchRounds}
+          currentImageSearchRound={currentImageSearchRound}
+          setCurrentImageSearchRound={setCurrentImageSearchRound}
+          pptOutline={pptOutline}
+          pptOutlineStreaming={pptOutlineStreaming}
+          pptProjects={pptProjects}
         onSelectProject={handleSelectProject}
         onDownload={handleDownload}
         onShare={handleShare}

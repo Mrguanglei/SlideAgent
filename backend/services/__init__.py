@@ -11,6 +11,7 @@ from .llm import (
 from .search import (
     tavily_search_standalone,
     generate_search_queries,
+    should_use_web_search,
     execute_search,
     stream_search_thinking,
     stream_deep_thinking
@@ -40,6 +41,7 @@ __all__ = [
     # Search
     "tavily_search_standalone",
     "generate_search_queries",
+    "should_use_web_search",
     "execute_search",
     "stream_search_thinking",
     "stream_deep_thinking",

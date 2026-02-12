@@ -282,7 +282,7 @@ export default function RightPanel({
 
       {/* 面板内容 */}
       <div className="flex-1 overflow-hidden">
-        {rightPanelType === "ppt_preview" && (
+        <div className={rightPanelType === "ppt_preview" ? "h-full" : "hidden"}>
           <PPTPreviewPanel
             pptHtmlCode={pptHtmlCode}
             pptViewMode={pptViewMode}
@@ -294,7 +294,7 @@ export default function RightPanel({
             onSaveSlide={onSaveSlide}
             pptProject={pptProject}
           />
-        )}
+        </div>
 
         {rightPanelType === "task_plan" && (
           <ScrollArea className="h-full">

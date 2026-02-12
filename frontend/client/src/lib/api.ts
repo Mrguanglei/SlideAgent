@@ -21,6 +21,7 @@ export interface ConversationDetail {
   conversation: Conversation;
   session_id?: string;
   task_status?: string;
+  search_mode?: "auto" | "on" | "off";
   messages?: Message[];
   ppt_project?: PPTProject;
   task_plans?: TaskPlan[];

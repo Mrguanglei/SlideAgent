@@ -147,6 +147,11 @@ async def get_conversation(
     # 获取 Session 状态
     session = await crud.get_session_by_conversation(db, conversation_id)
     task_status = session.task_status if session else "idle"
+    search_mode = "auto"
+    if session and isinstance(session.supplement_data, dict):
+        raw_mode = session.supplement_data.get("search_mode")
+        if isinstance(raw_mode, str) and raw_mode.strip().lower() in ("auto", "on", "off"):
+            search_mode = raw_mode.strip().lower()
 
     # 获取消息列表
     messages = await crud.get_messages(db, conversation_id)
@@ -251,6 +256,7 @@ async def get_conversation(
             "updated_at": conversation.updated_at.isoformat(),
             "task_status": task_status
         },
+        "search_mode": search_mode,
         "messages": messages_with_tools,
         "ppt_project": ppt_project_dict
     }
@@ -272,6 +278,11 @@ async def get_conversation_by_uuid(
     # 获取 Session 状态
     session = await crud.get_session_by_conversation(db, conversation_id)
     task_status = session.task_status if session else "idle"
+    search_mode = "auto"
+    if session and isinstance(session.supplement_data, dict):
+        raw_mode = session.supplement_data.get("search_mode")
+        if isinstance(raw_mode, str) and raw_mode.strip().lower() in ("auto", "on", "off"):
+            search_mode = raw_mode.strip().lower()
 
     # 获取消息列表
     messages = await crud.get_messages(db, conversation_id)
@@ -377,6 +388,7 @@ async def get_conversation_by_uuid(
         },
         "session_id": session.id if session else None,
         "task_status": task_status,
+        "search_mode": search_mode,
         "messages": messages_with_tools,
         "ppt_project": ppt_project_dict
     }

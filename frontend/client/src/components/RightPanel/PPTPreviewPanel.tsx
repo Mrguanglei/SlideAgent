@@ -30,6 +30,7 @@ export default function PPTPreviewPanel({
   const slideRefsCode = useRef<(HTMLDivElement | null)[]>([]);
   const loadedSlidesRef = useRef<Set<number>>(new Set());
   const [loadedSlidesCount, setLoadedSlidesCount] = useState(0);
+  const [renderEpoch, setRenderEpoch] = useState(0);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
   // 当 targetSlideIndex 改变时，滚动到对应的幻灯片
@@ -124,10 +125,22 @@ export default function PPTPreviewPanel({
     !isEmptySlides &&
     loadedSlidesCount < slidesHtml.length;
 
+  const prevSlidesCountRef = useRef(0);
+
   useEffect(() => {
-    loadedSlidesRef.current.clear();
-    setLoadedSlidesCount(0);
-  }, [pptHtmlCode, pptProject, pptViewMode, isEditMode]);
+    const becameEmpty = slidesHtml.length === 0 && prevSlidesCountRef.current > 0;
+    if (becameEmpty) {
+      loadedSlidesRef.current.clear();
+      setLoadedSlidesCount(0);
+      setRenderEpoch(prev => prev + 1);
+    } else if (loadedSlidesCount !== loadedSlidesRef.current.size) {
+      setLoadedSlidesCount(loadedSlidesRef.current.size);
+    } else if (loadedSlidesCount > slidesHtml.length) {
+      setLoadedSlidesCount(slidesHtml.length);
+    }
+
+    prevSlidesCountRef.current = slidesHtml.length;
+  }, [slidesHtml.length, loadedSlidesCount]);
 
   const copyToClipboard = async (text: string, index: number) => {
     const fallbackCopy = () => {
@@ -244,7 +257,7 @@ export default function PPTPreviewPanel({
                                 </div>
                               )}
                               <iframe
-                                key={`preview-${idx}-${pptViewMode}`}
+                                key={`preview-${idx}-${pptViewMode}-${renderEpoch}`}
                                 srcDoc={processedSlide}
                                 className="border-0"
                                 title={`Slide ${idx + 1}`}

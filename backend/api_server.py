@@ -152,6 +152,7 @@ from services.knowledge.document_parser import DocumentParser
 from services.llm import call_llm_api, call_llm_api_stream, extract_core_topic
 from services.search import (
     generate_search_queries,
+    should_use_web_search,
     execute_search,
     search_and_download_images,
     stream_search_thinking,
@@ -245,6 +246,7 @@ class ChatRequest(BaseModel):
     powerpoint_type: Optional[str] = "16:9 Widescreen"
     convert_type: Optional[str] = "slide_design"
     deep_thinking_mode: Optional[bool] = False  # 新增：深度思考模式
+    search_mode: Optional[str] = "auto"  # auto | on | off
 
 
 class ConfirmRequest(BaseModel):
@@ -252,6 +254,7 @@ class ConfirmRequest(BaseModel):
     session_id: Optional[str] = None
     conversation_id: Optional[int] = None
     supplement_data: Dict[str, Any]
+    search_mode: Optional[str] = None
 
 
 # ==================== 核心流式生成函数 ====================
@@ -268,6 +271,7 @@ async def stream_ppt_generation(
     template: Optional[str] = None,
     powerpoint_type: str = "16:9 Widescreen",
     convert_type: str = "slide_design",
+    search_mode: Optional[str] = None,
     db: Optional[AsyncSession] = None,
     save_user_message: bool = True,
     search_results: list = None, 
@@ -361,6 +365,20 @@ async def stream_ppt_generation(
             )
             await db.commit()
         logger.info(f"[stream_ppt_generation] Session stage updated to 'confirmed'")
+
+    # 记录搜索模式（不影响 stage 流转）
+    if search_mode:
+        normalized_mode = str(search_mode).strip().lower()
+        if normalized_mode in ("auto", "on", "off"):
+            if session["supplement_data"] is None:
+                session["supplement_data"] = {}
+            session["supplement_data"]["search_mode"] = normalized_mode
+            if db:
+                await crud.update_session(
+                    db, session_id,
+                    supplement_data=session["supplement_data"]
+                )
+                await db.commit()
     
     # 保存用户消息到数据库（只在需要时保存，避免重复）
     if db and conversation_id and save_user_message:
@@ -625,19 +643,37 @@ async def stream_ppt_generation(
             except Exception as e:
                 logger.error(f"Failed to save task plan: {e}")
         
-        # 检查是否跳过搜索（基于文件上下文）
-        if session["supplement_data"].get("skip_search"):
-            logger.info("Skipping search phase due to file context")
-            session["stage"] = "outline"  # Fixed: was "ppt_outline", should be "outline"
-            # 也可以选择跳过深度思考，或者保留它来分析文件内容
-            # 用户说"直接按照文档写PPT"，暗示跳过搜索
-            # 我们直接进入大纲生成阶段，但需要确保大纲生成器能利用 file_context
-        else:
+        # 根据搜索模式决定是否进入搜索阶段
+        search_mode = (session.get("supplement_data") or {}).get("search_mode", "auto")
+        search_mode = str(search_mode).strip().lower()
+        if search_mode not in ("auto", "on", "off"):
+            search_mode = "auto"
+
+        if search_mode == "off":
+            logger.info("Search disabled by user preference")
+            session["stage"] = "outline"
+            session["search_results"] = []
+            session["deep_thinking_content"] = ""
+        elif search_mode == "on":
+            logger.info("Search forced on by user preference")
             session["stage"] = "searching"
-            
+        else:
+            logger.info("Auto search mode enabled, deciding whether to search")
+            should_search = await should_use_web_search(instruction, session.get("supplement_data") or {})
+            session["stage"] = "searching" if should_search else "outline"
+            if not should_search:
+                session["search_results"] = []
+                session["deep_thinking_content"] = ""
+
         # 更新数据库中的 session 状态
         if db:
-            await crud.update_session(db, session_id, stage=session["stage"])
+            await crud.update_session(
+                db,
+                session_id,
+                stage=session["stage"],
+                search_results=session.get("search_results"),
+                deep_thinking_content=session.get("deep_thinking_content"),
+            )
             await db.commit()
     
     # ==================== 阶段 4: 搜索 ====================
@@ -1241,6 +1277,7 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
             template=request.template,
             powerpoint_type=request.powerpoint_type,
             convert_type=request.convert_type,
+            search_mode=request.search_mode,
             db=db,
         ),
         media_type="text/event-stream",
@@ -1349,6 +1386,7 @@ async def confirm(request: ConfirmRequest, db: AsyncSession = Depends(get_db)):
             session_id=session_id,
             conversation_id=conversation_id,
             supplement_data=request.supplement_data,
+            search_mode=request.search_mode,
             db=db,
             save_user_message=False,  # 用户消息已在初始请求中保存，不需要重复保存
         ),

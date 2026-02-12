@@ -126,6 +126,58 @@ async def generate_search_queries(topic: str, supplement_data: dict) -> List[str
         return [core_topic]
 
 
+async def should_use_web_search(topic: str, supplement_data: dict) -> bool:
+    """自动判断是否需要联网搜索"""
+    supplement_data = supplement_data or {}
+    audience = supplement_data.get("audience", "")
+    modules = supplement_data.get("modules", [])
+    keywords = supplement_data.get("keywords", "")
+    file_context = supplement_data.get("file_context", "")
+    skip_search_flag = supplement_data.get("skip_search", False)
+
+    file_excerpt = ""
+    if isinstance(file_context, str) and file_context.strip():
+        file_excerpt = file_context.strip()[:800]
+
+    prompt = f"""请判断为「{topic}」制作PPT时是否需要联网搜索资料。
+
+判断原则：
+1. 若主题涉及最新数据、政策法规、市场动态、具体统计/案例、或需要外部证据支持，优先选择 YES。
+2. 若用户提供的文件内容已足够完整、或明确不需要外部资料，选择 NO。
+3. 无法确定时，优先 YES（保证信息充实）。
+
+已知信息：
+- 目标受众：{audience or '未提供'}
+- 内容模块：{', '.join(modules) if modules else '未提供'}
+- 重点关键词：{keywords or '未提供'}
+- 是否检测到文件内容：{'是' if file_excerpt else '否'}
+- 系统提示 skip_search：{'是' if skip_search_flag else '否'}
+- 文件摘要（如有）：{file_excerpt or '无'}
+
+只输出 YES 或 NO，不要解释。"""
+
+    try:
+        response = await call_llm_api([
+            {"role": "system", "content": "你是检索策略助手，只输出 YES 或 NO。"},
+            {"role": "user", "content": prompt}
+        ])
+        if not response:
+            return True
+        decision = response.strip().upper()
+        if "YES" in decision:
+            return True
+        if "NO" in decision:
+            return False
+        if decision.startswith("是"):
+            return True
+        if decision.startswith("否"):
+            return False
+        return True
+    except Exception as e:
+        logger.error(f"Auto search decision failed: {e}")
+        return True
+
+
 async def execute_search(query: str, max_results: int = 10) -> List[Dict]:
     """执行搜索，返回结果列表"""
     results = []

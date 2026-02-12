@@ -6,12 +6,136 @@ PPTAgent 任务规划服务模块
 
 import json
 import logging
-from typing import Dict, Optional, AsyncGenerator, Tuple
+from typing import Dict, Optional, AsyncGenerator, Tuple, List
 
 from services.llm import call_llm_api, call_llm_api_stream, clean_json_response
 from utils.config import Config
 
 logger = logging.getLogger(__name__)
+
+
+def build_task_steps(supplement_data: dict) -> list:
+    """根据补充信息生成任务步骤（避免在关闭联网时出现搜索步骤）"""
+    supplement_data = supplement_data or {}
+    search_mode = str(supplement_data.get("search_mode", "auto")).strip().lower()
+    if search_mode not in ("auto", "on", "off"):
+        search_mode = "auto"
+    skip_search = bool(supplement_data.get("skip_search", False))
+    file_context = supplement_data.get("file_context", "")
+
+    should_search = True
+    if search_mode == "off":
+        should_search = False
+    elif search_mode == "on":
+        should_search = True
+    else:
+        if skip_search or (isinstance(file_context, str) and file_context.strip()):
+            should_search = False
+
+    first_step = "搜索相关资料和数据" if should_search else "梳理已有资料与关键信息"
+
+    return [
+        {"id": 1, "text": first_step, "status": "pending"},
+        {"id": 2, "text": "整理内容大纲", "status": "pending"},
+        {"id": 3, "text": "设计页面布局", "status": "pending"},
+        {"id": 4, "text": "生成各页幻灯片", "status": "pending"},
+        {"id": 5, "text": "优化和导出PPT", "status": "pending"},
+    ]
+
+
+async def generate_task_steps_with_llm(
+    topic: str,
+    supplement_data: dict,
+    plan_text: str
+) -> List[Dict]:
+    """让模型生成执行步骤（避免固定模板）"""
+    supplement_data = supplement_data or {}
+    audience = supplement_data.get("audience", "专业人士")
+    modules = supplement_data.get("modules", [])
+    style = supplement_data.get("style", "简约现代")
+    keywords = supplement_data.get("keywords", "")
+    file_context = supplement_data.get("file_context", "")
+
+    search_mode = str(supplement_data.get("search_mode", "auto")).strip().lower()
+    if search_mode not in ("auto", "on", "off"):
+        search_mode = "auto"
+    skip_search = bool(supplement_data.get("skip_search", False))
+
+    should_avoid_search = search_mode == "off" or skip_search or (
+        isinstance(file_context, str) and file_context.strip()
+    )
+
+    constraints = [
+        "步骤用中文短句",
+        "输出4到7条即可",
+        "不要包含编号或前缀，只输出JSON数组",
+    ]
+    if should_avoid_search:
+        constraints.append("不要出现“搜索/查找/联网/外部资料”等字样")
+        constraints.append("第一步从整理已有资料或明确需求开始")
+
+    prompt = f"""请根据以下信息生成PPT任务的执行步骤。
+
+主题：{topic}
+受众：{audience}
+模块：{', '.join(modules) if modules else '待定'}
+风格：{style}
+重点：{keywords if keywords else '无'}
+任务规划摘要：
+{plan_text[:1200]}
+
+要求：
+{chr(10).join(f"- {c}" for c in constraints)}
+
+输出格式示例：
+[
+  "第一步内容",
+  "第二步内容",
+  "第三步内容"
+]
+"""
+
+    try:
+        response = await call_llm_api([
+            {"role": "system", "content": "你是任务规划助手，只输出JSON数组。"},
+            {"role": "user", "content": prompt}
+        ])
+        response = clean_json_response(response or "")
+        if not response.strip():
+            return build_task_steps(supplement_data)
+
+        parsed = json.loads(response)
+        steps_raw = None
+        if isinstance(parsed, list):
+            steps_raw = parsed
+        elif isinstance(parsed, dict):
+            steps_raw = parsed.get("steps") or parsed.get("items")
+
+        if not steps_raw or not isinstance(steps_raw, list):
+            return build_task_steps(supplement_data)
+
+        steps_clean = []
+        for item in steps_raw:
+            if isinstance(item, str):
+                text = item.strip()
+            elif isinstance(item, dict):
+                text = str(item.get("text") or item.get("content") or "").strip()
+            else:
+                text = ""
+            if text:
+                steps_clean.append(text)
+
+        if not steps_clean:
+            return build_task_steps(supplement_data)
+
+        steps_clean = steps_clean[:7]
+        return [
+            {"id": idx + 1, "text": text, "status": "pending"}
+            for idx, text in enumerate(steps_clean)
+        ]
+    except Exception as e:
+        logger.error(f"Failed to generate task steps: {e}")
+        return build_task_steps(supplement_data)
 
 
 async def check_ppt_intent(instruction: str) -> bool:
@@ -224,6 +348,9 @@ async def stream_task_plan_with_llm(topic: str, supplement_data: dict) -> AsyncG
     keywords = supplement_data.get("keywords", "")
 
     file_context = supplement_data.get("file_context", "")
+    search_mode = str(supplement_data.get("search_mode", "auto")).strip().lower()
+    if search_mode not in ("auto", "on", "off"):
+        search_mode = "auto"
 
     # 根据是否有文件内容生成不同的提示
     if file_context:
@@ -265,7 +392,43 @@ async def stream_task_plan_with_llm(topic: str, supplement_data: dict) -> AsyncG
 
 请根据文件内容和主题"{topic}"，生成针对性的分析内容，保持上述格式。"""
     else:
-        prompt = f"""用户询问"{topic}"，请分析这个请求并生成详细的任务执行规划。
+        if search_mode == "off":
+            prompt = f"""用户询问"{topic}"，当前设置为不联网搜索，请基于已知信息生成详细的任务执行规划。
+
+目标受众：{audience}
+内容模块：{', '.join(modules) if modules else '待定'}
+设计风格：{style}
+重点内容：{keywords if keywords else '无特别要求'}
+
+请按以下格式分析（使用纯文本，不要使用JSON）：
+
+用户询问"{topic}"，我需要分析这个请求：
+
+1. 核心问题识别：
+• [分析这个主题是什么]
+• [用户需要了解什么信息]
+• [可能涉及的相关领域]
+
+2. 信息整理维度：
+• 基本定义和功能定位
+• 主要特点和核心功能
+• 技术特点和创新点
+• 应用场景和目标用户
+• 发展背景和所属机构
+• 市场表现和用户评价
+
+3. 资料整理策略：
+• 不使用联网搜索
+• 基于用户输入与已有常识进行梳理
+• 如用户补充资料，优先以用户资料为准
+
+4. 质量校验：
+• 避免编造具体数据或来源
+• 对缺失信息使用占位或建议补充
+
+请根据用户的具体主题"{topic}"，生成针对性的分析内容，保持上述格式。"""
+        else:
+            prompt = f"""用户询问"{topic}"，请分析这个请求并生成详细的任务执行规划。
 
 目标受众：{audience}
 内容模块：{', '.join(modules) if modules else '待定'}
@@ -312,8 +475,9 @@ async def stream_task_plan_with_llm(topic: str, supplement_data: dict) -> AsyncG
             full_text += chunk
             yield (chunk, None)  # 流式输出文本块
 
-        # 最后解析并返回结构化数据
-        task_plan_data = parse_task_plan_text(full_text, topic, supplement_data)
+        # 最后解析并返回结构化数据（步骤由模型生成）
+        steps = await generate_task_steps_with_llm(topic, supplement_data, full_text)
+        task_plan_data = parse_task_plan_text(full_text, topic, supplement_data, steps=steps)
         yield ("", task_plan_data)  # 最后返回完整数据
 
     except Exception as e:
@@ -322,18 +486,12 @@ async def stream_task_plan_with_llm(topic: str, supplement_data: dict) -> AsyncG
         fallback_data = {
             "coreRequirement": f"制作一份关于「{topic}」的PPT，面向{audience}，采用{style}风格",
             "streamContent": f'用户询问「{topic}」，我需要分析这个请求：\n\n1. 核心问题识别：\n• 「{topic}」是需要分析的主题\n• 用户需要了解这个主题的详细信息\n• 可能需要收集相关数据和案例',
-            "steps": [
-                {"id": 1, "text": "搜索相关资料和数据", "status": "pending"},
-                {"id": 2, "text": "整理内容大纲", "status": "pending"},
-                {"id": 3, "text": "设计页面布局", "status": "pending"},
-                {"id": 4, "text": "生成各页幻灯片", "status": "pending"},
-                {"id": 5, "text": "优化和导出PPT", "status": "pending"},
-            ]
+            "steps": build_task_steps(supplement_data),
         }
         yield ("", fallback_data)
 
 
-def parse_task_plan_text(text: str, topic: str, supplement_data: dict) -> dict:
+def parse_task_plan_text(text: str, topic: str, supplement_data: dict, steps: Optional[list] = None) -> dict:
     """将流式文本解析为结构化数据"""
     audience = supplement_data.get("audience", "专业人士")
     style = supplement_data.get("style", "简约现代")
@@ -341,13 +499,7 @@ def parse_task_plan_text(text: str, topic: str, supplement_data: dict) -> dict:
     return {
         "coreRequirement": f"制作一份关于「{topic}」的PPT，面向{audience}，采用{style}风格",
         "streamContent": text,  # 保存流式内容
-        "steps": [
-            {"id": 1, "text": "搜索相关资料和数据", "status": "pending"},
-            {"id": 2, "text": "整理内容大纲", "status": "pending"},
-            {"id": 3, "text": "设计页面布局", "status": "pending"},
-            {"id": 4, "text": "生成各页幻灯片", "status": "pending"},
-            {"id": 5, "text": "优化和导出PPT", "status": "pending"},
-        ]
+        "steps": steps or build_task_steps(supplement_data),
     }
 
 
