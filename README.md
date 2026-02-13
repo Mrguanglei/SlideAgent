@@ -1,4 +1,4 @@
-# SlideAgent — Make PPT Generation Simple
+# SlideAgent - Enables Everyone to Easily Create Professional Presentations
 
 [中文](README_zh.md) | [English](README.md)
 
@@ -77,6 +77,8 @@
 | **MiniMax** | MiniMax-Text Series | ✅ Supported | |
 | **ByteDance (Doubao)** | Doubao-1.8 | ✅ Supported | |
 | | Doubao-pro | ✅ Supported | |
+| **Intern (Shanghai AI Lab)** | intern-s1-pro      | ✅ Supported |    |
+
 
 
 ## 🚧 TODO (Not Tested)
@@ -92,6 +94,7 @@
 | **Baidu** | ERNIE 4.0 | 🚧 Not Tested | |
 | **Moonshot AI** | Kimi k1.5 | 🚧 Not Tested | |
 | **01.AI** | Yi-Large | 🚧 Not Tested | |
+| **Kimi** | Kimi-2.5 | 🚧 Not Tested | |
 
 
 
@@ -171,7 +174,7 @@ All forms of contributions are welcome! If you have any ideas or suggestions, fe
 
 ## 🙏 Acknowledgments
 
-- [PPTAgent (CAS)](https://github.com/icip-cas/PPTAgent) - This project is based on this open-source project with secondary development, thanks to the original authors.
+- [Intern-S1 Pro](https://huggingface.co/internlm/Intern-S1-Pro) - The Shanghai Artificial Intelligence Laboratory provides computing power support.
 - [shadcn/ui](https://ui.shadcn.com/) - Frontend UI component library.
 - [FastAPI](https://fastapi.tiangolo.com/) - High-performance Python web framework.
 - [React](https://react.dev/) - JavaScript library for building user interfaces.
@@ -180,3 +183,5 @@ All forms of contributions are welcome! If you have any ideas or suggestions, fe
 ## 📄 License
 
 This project follows the **[AGPL-3.0 License](https://www.gnu.org/licenses/agpl-3.0.html)**. For learning and communication purposes only, commercial use is prohibited.
+
+## If this helps you, please consider starring the repo ✨

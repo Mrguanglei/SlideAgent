@@ -1,4 +1,4 @@
-# SlideAgent — 让 PPT 生成更简单
+# SlideAgent — 让每个人都能轻松做出专业演示
 
 [English](README.md) | [中文](README_zh.md)
 
@@ -76,7 +76,7 @@
 | **MiniMax**   | MiniMax-Text 系列      | ✅ 已支持 |    |
 | **字节跳动 (豆包)** | Doubao-1.8      | ✅ 已支持 |    |
 |               | Doubao-pro   | ✅ 已支持 |    |
-
+| **Intern (书生)** | intern-s1-pro      | ✅ 已支持 |    |
 
 ## 🚧 未测试完成 (TODO)
 | 厂商/系列         | 模型                | 状态     | 备注      |
@@ -169,7 +169,7 @@ export_tool/         # 导出服务 (PDF/PNG/HTML/PPTX)
 
 ## 🙏 致谢
 
-- [PPTAgent (CAS)](https://github.com/icip-cas/PPTAgent) - 本项目基于此开源项目二次开发，感谢原作者贡献。
+- [Intern-S1 Pro](https://huggingface.co/internlm/Intern-S1-Pro)  - 上海人工智能实验室提供算力支持
 - [shadcn/ui](https://ui.shadcn.com/) - 前端 UI 组件库。
 - [FastAPI](https://fastapi.tiangolo.com/) - 高性能的 Python Web 框架。
 - [React](https://react.dev/) - 用于构建用户界面的 JavaScript 库。
