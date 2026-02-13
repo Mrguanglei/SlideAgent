@@ -1,9 +1,9 @@
 <div align="center">
-  <img src="images/logo.png" width="800"/>
+  <img src="images/logs.png" width="800"/>
   <br /><br />
 
 [![GitHub Repo stars](https://img.shields.io/github/stars/Mrguanglei/SlideAgent?style=social)](https://github.com/Mrguanglei/SlideAgent/stargazers)
-[![license](https://img.shields.io/github/license/InternLM/xtuner.svg)](https://github.com/Mrguanglei/SlideAgent/blob/main/LICENSE)
+[![license](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](https://github.com/Mrguanglei/SlideAgent/blob/main/LICENSE)
 [![issue resolution](https://img.shields.io/github/issues-closed-raw/Mrguanglei/SlideAgent)](https://github.com/Mrguanglei/SlideAgent/issues)
 [![open issues](https://img.shields.io/github/issues-raw/Mrguanglei/SlideAgent)](https://github.com/Mrguanglei/SlideAgent/issues)
 
@@ -93,6 +93,9 @@
 | **MiniMax**   | MiniMax-Text 系列      | ✅ 已支持 |    |
 | **字节跳动 (豆包)** | Doubao-1.8      | ✅ 已支持 |    |
 |               | Doubao-pro   | ✅ 已支持 |    |
+| **Kimi** | kimi-k2-turbo-preview | ✅ 已支持 | |
+| **阿里云**       | Qwen-Max          | ✅ 已支持  |         |
+|               | Qwen-Plus         | ✅ 已支持 |         |
 | **Intern (书生)** | intern-s1-pro      | ✅ 已支持 |    |
 
 ## 🚧 未测试完成 (TODO)
@@ -102,11 +105,10 @@
 |               | GPT-4o-mini       | 🚧 未测试 |         |
 | **Anthropic** | Claude 3.5 Sonnet | 🚧 未测试 |         |
 |               | Claude 3 Opus     | 🚧 未测试 |         |
-| **阿里云**       | Qwen-Max          | 🚧 未测试 |         |
-|               | Qwen-Plus         | 🚧 未测试 |         |
 | **百度**        | ERNIE 4.0         | 🚧 未测试 |         |
 | **月之暗面**      | Kimi k1.5         | 🚧 未测试 |         |
 | **零一万物**      | Yi-Large          | 🚧 未测试 |         |
+| **...** | ....| 🚧 未测试| |
 
 
 

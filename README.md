@@ -1,10 +1,10 @@
 
 <div align="center">
-  <img src="images/logo.png" width="800"/>
+  <img src="images/logs.png" width="800"/>
   <br /><br />
 
 [![GitHub Repo stars](https://img.shields.io/github/stars/Mrguanglei/SlideAgent?style=social)](https://github.com/Mrguanglei/SlideAgent/stargazers)
-[![license](https://img.shields.io/github/license/InternLM/xtuner.svg)](https://github.com/Mrguanglei/SlideAgent/blob/main/LICENSE)
+[![license](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](https://github.com/Mrguanglei/SlideAgent/blob/main/LICENSE)
 [![issue resolution](https://img.shields.io/github/issues-closed-raw/Mrguanglei/SlideAgent)](https://github.com/Mrguanglei/SlideAgent/issues)
 [![open issues](https://img.shields.io/github/issues-raw/Mrguanglei/SlideAgent)](https://github.com/Mrguanglei/SlideAgent/issues)
 
@@ -94,6 +94,9 @@
 | **MiniMax** | MiniMax-Text Series | ✅ Supported | |
 | **ByteDance (Doubao)** | Doubao-1.8 | ✅ Supported | |
 | | Doubao-pro | ✅ Supported | |
+| **Kimi** | kimi-k2-turbo-preview | ✅ Supported | |
+| **Alibaba Cloud** | Qwen-Max | ✅ Supported | |
+| | Qwen-Plus | ✅ Supported | |
 | **Intern (Shanghai AI Lab)** | intern-s1-pro      | ✅ Supported |    |
 
 
@@ -106,12 +109,10 @@
 | | GPT-4o-mini | 🚧 Not Tested | |
 | **Anthropic** | Claude 3.5 Sonnet | 🚧 Not Tested | |
 | | Claude 3 Opus | 🚧 Not Tested | |
-| **Alibaba Cloud** | Qwen-Max | 🚧 Not Tested | |
-| | Qwen-Plus | 🚧 Not Tested | |
 | **Baidu** | ERNIE 4.0 | 🚧 Not Tested | |
 | **Moonshot AI** | Kimi k1.5 | 🚧 Not Tested | |
 | **01.AI** | Yi-Large | 🚧 Not Tested | |
-| **Kimi** | Kimi-2.5 | 🚧 Not Tested | |
+| **...** | ....| 🚧 Not Tested | |
 
 
 
