@@ -1,6 +1,20 @@
-# SlideAgent - Enables Everyone to Easily Create Professional Presentations
+
+<div align="center">
+  <img src="images/logo.png" width="600"/>
+  <br /><br />
+
+[![GitHub Repo stars](https://img.shields.io/github/stars/Mrguanglei/SlideAgent?style=social)](https://github.com/Mrguanglei/SlideAgent/stargazers)
+[![license](https://img.shields.io/github/license/InternLM/xtuner.svg)](https://github.com/Mrguanglei/SlideAgent/blob/main/LICENSE)
+[![issue resolution](https://img.shields.io/github/issues-closed-raw/Mrguanglei/SlideAgent)](https://github.com/Mrguanglei/SlideAgent/issues)
+[![open issues](https://img.shields.io/github/issues-raw/Mrguanglei/SlideAgent)](https://github.com/Mrguanglei/SlideAgent/issues)
 
 [中文](README_zh.md) | [English](README.md)
+
+</div>
+
+# SlideAgent - Enables Everyone to Easily Create Professional Presentations
+
+
 
 **SlideAgent** is an open-source, AI-driven presentation generator. Provide a topic or documents, and it produces an outline, slide content, and a themed deck with online preview and multi-format export.
 
