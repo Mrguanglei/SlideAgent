@@ -192,6 +192,19 @@ export_tool/         # 导出服务 (PDF/PNG/HTML/PPTX)
 - [React](https://react.dev/) - 用于构建用户界面的 JavaScript 库。
 - [dom-to-pptx](https://github.com/atharva9167j/dom-to-pptx/tree/master/src) - 用于导出的 pptx 静态库
 
+
+## 🖊️ 引用
+
+```bibtex
+@misc{2026SlideAgent,
+    title={SlideAgent: Enables Everyone to Easily Create Professional Presentations},
+    author={SlideAgent Contributors},
+    howpublished = {\url{https://github.com/Mrguanglei/SlideAgent}},
+    year={2026}
+}
+```
+
+
 ## 📄 许可证
 
 本项目遵循 **[AGPL-3.0 协议](https://www.gnu.org/licenses/agpl-3.0.html)**。仅供学习和交流使用，禁止用于任何商业用途。

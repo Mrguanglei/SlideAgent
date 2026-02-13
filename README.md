@@ -197,6 +197,17 @@ All forms of contributions are welcome! If you have any ideas or suggestions, fe
 - [React](https://react.dev/) - JavaScript library for building user interfaces.
 - [dom-to-pptx](https://github.com/atharva9167j/dom-to-pptx/tree/master/src) - The static library for exporting pptx
 
+## 🖊️ Citation
+
+```bibtex
+@misc{2026SlideAgent,
+    title={SlideAgent: Enables Everyone to Easily Create Professional Presentations},
+    author={SlideAgent Contributors},
+    howpublished = {\url{https://github.com/Mrguanglei/SlideAgent}},
+    year={2026}
+}
+```
+
 ## 📄 License
 
 This project follows the **[AGPL-3.0 License](https://www.gnu.org/licenses/agpl-3.0.html)**. For learning and communication purposes only, commercial use is prohibited.
