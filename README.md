@@ -1,6 +1,6 @@
 
 <div align="center">
-  <img src="images/logo.png" width="600"/>
+  <img src="images/logo.png" width="800"/>
   <br /><br />
 
 [![GitHub Repo stars](https://img.shields.io/github/stars/Mrguanglei/SlideAgent?style=social)](https://github.com/Mrguanglei/SlideAgent/stargazers)
