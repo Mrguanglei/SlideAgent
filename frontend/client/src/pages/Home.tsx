@@ -230,6 +230,74 @@ export default function Home() {
   const [activeAttachments, setActiveAttachments] = useState<UploadResponse[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // 下载进度（显示在当前对话顶部）
+  const [downloadProgress, setDownloadProgress] = useState<{
+    percent: number;
+    status: "running" | "success" | "error";
+    label: string;
+  } | null>(null);
+  const downloadHideTimerRef = useRef<number | null>(null);
+
+  const handleDownloadProgress = useCallback((payload: {
+    status: "start" | "progress" | "complete" | "error";
+    percent?: number;
+    label?: string;
+  }) => {
+    if (downloadHideTimerRef.current !== null) {
+      window.clearTimeout(downloadHideTimerRef.current);
+      downloadHideTimerRef.current = null;
+    }
+
+    if (payload.status === "start") {
+      setDownloadProgress({
+        percent: Math.max(0, Math.min(100, payload.percent ?? 0)),
+        status: "running",
+        label: payload.label || "正在导出",
+      });
+      return;
+    }
+
+    if (payload.status === "progress") {
+      setDownloadProgress(prev => ({
+        percent: Math.max(0, Math.min(100, payload.percent ?? prev?.percent ?? 0)),
+        status: "running",
+        label: payload.label || prev?.label || "正在导出",
+      }));
+      return;
+    }
+
+    if (payload.status === "complete") {
+      setDownloadProgress({
+        percent: 100,
+        status: "success",
+        label: payload.label || "下载完成",
+      });
+      downloadHideTimerRef.current = window.setTimeout(() => {
+        setDownloadProgress(null);
+      }, 1600);
+      return;
+    }
+
+    if (payload.status === "error") {
+      setDownloadProgress({
+        percent: Math.max(0, Math.min(100, payload.percent ?? 0)),
+        status: "error",
+        label: payload.label || "导出失败",
+      });
+      downloadHideTimerRef.current = window.setTimeout(() => {
+        setDownloadProgress(null);
+      }, 2400);
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (downloadHideTimerRef.current !== null) {
+        window.clearTimeout(downloadHideTimerRef.current);
+      }
+    };
+  }, []);
+
   // IME composition handling for home mode textarea
   const homeComposition = useComposition<HTMLTextAreaElement>({
     onKeyDown: (e) => {
@@ -1645,6 +1713,37 @@ export default function Home() {
           </div>
         )}
 
+        {/* 下载进度条 - 悬浮在聊天与右侧面板之间 */}
+        {mode === "chat" && downloadProgress && (() => {
+          const percent = Math.round(downloadProgress.percent);
+          const label = downloadProgress.label || "PPT";
+          const message = downloadProgress.status === "running"
+            ? `正在导出${label}文件，耗时可能较长，文件合成 ${percent}%...`
+            : downloadProgress.status === "error"
+              ? (downloadProgress.label || "导出失败")
+              : "下载完成";
+
+          return (
+            <div className="absolute top-13 left-full -translate-x-1/2 z-50 pointer-events-none">
+              <div className="pointer-events-auto flex items-center gap-2 rounded-full border px-3 py-2 shadow-md bg-slate-900 text-white border-slate-700/60 max-w-[460px]">
+                {downloadProgress.status === "running" && (
+                  <Loader2 className="h-3 w-3 animate-spin opacity-90" />
+                )}
+                <div className="text-xs leading-tight truncate text-white/90 max-w-[380px]">
+                  {message}
+                </div>
+                <button
+                  onClick={() => setDownloadProgress(null)}
+                  className="text-white/70 hover:text-white transition-colors"
+                  aria-label="关闭"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* 主内容区 */}
         <div className="flex-1 overflow-hidden">
           {mode === "home" ? (
@@ -1828,80 +1927,80 @@ export default function Home() {
             </ScrollArea>
           ) : (
             // 聊天模式
-            <div className="h-full flex flex-col">
+            <div className="h-full flex flex-col relative">
               <div className="h-[58px] shrink-0" />
               <ScrollArea className="flex-1 chat-surface">
                 <div className="max-w-4xl mx-auto px-6 pt-0 pb-8">
                   {messages.map((message, index) => {
-                    const isFirstAiMessage =
-                      message.role === "assistant" &&
-                      (index === 0 || messages[index - 1]?.role !== "assistant");
-                    const isFirstUserMessage =
-                      message.role === "user" &&
-                      (index === 0 || messages[index - 1]?.role !== "user");
+                  const isFirstAiMessage =
+                    message.role === "assistant" &&
+                    (index === 0 || messages[index - 1]?.role !== "assistant");
+                  const isFirstUserMessage =
+                    message.role === "user" &&
+                    (index === 0 || messages[index - 1]?.role !== "user");
 
-                    return (
-                      <MessageItem
-                        key={message.id}
-                        message={message}
-                        onOpenPanel={openRightPanel}
-                        onConfirmInfo={handleConfirmInfo}
-                        currentTopic={currentTopic}
-                        autoConfirmCountdown={autoConfirmCountdown}
-                        onCancelAutoConfirm={cancelAutoConfirm}
-                        isFirstAiMessage={isFirstAiMessage}
-                        isFirstUserMessage={isFirstUserMessage}
-                        onSetSearchRound={setCurrentSearchRound}
-                        onSetImageSearchRound={setCurrentImageSearchRound}
-                        onScrollToSlide={handleScrollToSlide}
-                        showThinking={deepThinkingMode}
-                        isLoading={isLoading}
-                      />
-                    );
-                  })}
+                  return (
+                    <MessageItem
+                      key={message.id}
+                      message={message}
+                      onOpenPanel={openRightPanel}
+                      onConfirmInfo={handleConfirmInfo}
+                      currentTopic={currentTopic}
+                      autoConfirmCountdown={autoConfirmCountdown}
+                      onCancelAutoConfirm={cancelAutoConfirm}
+                      isFirstAiMessage={isFirstAiMessage}
+                      isFirstUserMessage={isFirstUserMessage}
+                      onSetSearchRound={setCurrentSearchRound}
+                      onSetImageSearchRound={setCurrentImageSearchRound}
+                      onScrollToSlide={handleScrollToSlide}
+                      showThinking={deepThinkingMode}
+                      isLoading={isLoading}
+                    />
+                  );
+                })}
 
-                  {isLoading && messages.length > 0 && messages[messages.length - 1]?.role === "user" && (() => {
-                    const hasAssistant = messages.some(m => m.role === "assistant");
-                    return (
-                      <div className="mb-6">
-                        {!hasAssistant ? (
-                          // 首次 AI 过渡提示
-                          <div className="space-y-1.5">
-                            <div className="flex items-center gap-1 -ml-2 min-h-12">
-                              <div className="w-12 h-12 flex items-center justify-center shrink-0">
-                                <AIAvatar isActive offsetX={AI_AVATAR_OFFSET_X} />
-                              </div>
-                              <span className="text-base font-medium text-foreground leading-none">SlideAgent</span>
-                            </div>
-                            <div className="pl-8">
-                              <div className="text-base text-foreground leading-relaxed whitespace-pre-wrap">
-                                <span>让我先核对下本轮任务的目标和重点偏好，正在梳理您的需求~</span>
-                                <span className="inline-flex items-center ml-2 align-middle">
-                                  <span className="w-2 h-2 rounded-full bg-primary animate-pulse align-middle" />
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          // 后续响应：使用加载动画
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm text-muted-foreground">正在生成中...</span>
-                            <LoadingDots />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                  {/* 确认后的加载状态 */}
-                  {isConfirming && (
+                {isLoading && messages.length > 0 && messages[messages.length - 1]?.role === "user" && (() => {
+                  const hasAssistant = messages.some(m => m.role === "assistant");
+                  return (
                     <div className="mb-6">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-muted-foreground">正在生成中...</span>
-                        <LoadingDots />
-                      </div>
+                      {!hasAssistant ? (
+                        // 首次 AI 过渡提示
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-1 -ml-2 min-h-12">
+                            <div className="w-12 h-12 flex items-center justify-center shrink-0">
+                              <AIAvatar isActive offsetX={AI_AVATAR_OFFSET_X} />
+                            </div>
+                            <span className="text-base font-medium text-foreground leading-none">SlideAgent</span>
+                          </div>
+                          <div className="pl-8">
+                            <div className="text-base text-foreground leading-relaxed whitespace-pre-wrap">
+                              <span>让我先核对下本轮任务的目标和重点偏好，正在梳理您的需求~</span>
+                              <span className="inline-flex items-center ml-2 align-middle">
+                                <span className="w-2 h-2 rounded-full bg-primary animate-pulse align-middle" />
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        // 后续响应：使用加载动画
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-muted-foreground">正在生成中...</span>
+                          <LoadingDots />
+                        </div>
+                      )}
                     </div>
-                  )}
+                  );
+                })()}
+
+                {/* 确认后的加载状态 */}
+                {isConfirming && (
+                  <div className="mb-6">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-muted-foreground">正在生成中...</span>
+                      <LoadingDots />
+                    </div>
+                  </div>
+                )}
 
                   <div ref={messagesEndRef} />
                 </div>
@@ -2053,11 +2152,11 @@ export default function Home() {
       </div>
 
       {/* 右侧面板 */}
-      <RightPanel
-        rightPanelType={rightPanelType}
-        setRightPanelType={setRightPanelType}
-        showRightPanel={showRightPanel}
-        setShowRightPanel={setShowRightPanel}
+        <RightPanel
+          rightPanelType={rightPanelType}
+          setRightPanelType={setRightPanelType}
+          showRightPanel={showRightPanel}
+          setShowRightPanel={setShowRightPanel}
         isLoading={isLoading}
         pptHtmlCode={pptHtmlCode}
         pptViewMode={pptViewMode}
@@ -2069,22 +2168,23 @@ export default function Home() {
         targetSlideIndex={targetSlideIndex}
         taskPlan={taskPlan}
         taskPlanStreaming={taskPlanStreaming}
-        searchRounds={searchRounds}
-        currentSearchRound={currentSearchRound}
-        setCurrentSearchRound={setCurrentSearchRound}
-        deepThinking={deepThinking}
-        deepThinkingStreaming={deepThinkingStreaming}
-        imageSearchRounds={imageSearchRounds}
-        currentImageSearchRound={currentImageSearchRound}
-        setCurrentImageSearchRound={setCurrentImageSearchRound}
-        pptOutline={pptOutline}
-        pptOutlineStreaming={pptOutlineStreaming}
-        pptProjects={pptProjects}
+          searchRounds={searchRounds}
+          currentSearchRound={currentSearchRound}
+          setCurrentSearchRound={setCurrentSearchRound}
+          deepThinking={deepThinking}
+          deepThinkingStreaming={deepThinkingStreaming}
+          imageSearchRounds={imageSearchRounds}
+          currentImageSearchRound={currentImageSearchRound}
+          setCurrentImageSearchRound={setCurrentImageSearchRound}
+          pptOutline={pptOutline}
+          pptOutlineStreaming={pptOutlineStreaming}
+          pptProjects={pptProjects}
         onSelectProject={handleSelectProject}
         onDownload={handleDownload}
         onShare={handleShare}
         onPlay={handlePlay}
         onFullscreen={handleFullscreen}
+        onDownloadProgress={handleDownloadProgress}
         onSaveSlide={handleSaveSlide}
       />
 
@@ -2097,6 +2197,7 @@ export default function Home() {
             projectId={pptProject.id}
             versionId={pptProject.current_version?.id}
             title={pptProject.title}
+            onProgress={handleDownloadProgress}
           />
         )
       }

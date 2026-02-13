@@ -3,12 +3,18 @@ import { useState } from "react";
 import { FileText, FileSliders, Globe, Download, Loader2 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 interface DownloadPopoverProps {
     projectId: number;
     versionId?: number;
     title: string;
     disabled?: boolean;
+    onProgress?: (payload: {
+        status: "start" | "progress" | "complete" | "error";
+        percent?: number;
+        label?: string;
+    }) => void;
 }
 
 interface ExportItemProps {
@@ -75,35 +81,126 @@ const extractFilename = (contentDisposition: string | null, fallback: string) =>
     return fallback;
 };
 
-export default function DownloadPopover({ projectId, versionId, title, disabled }: DownloadPopoverProps) {
+export default function DownloadPopover({
+    projectId,
+    versionId,
+    title,
+    disabled,
+    onProgress,
+}: DownloadPopoverProps) {
     const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
 
     const handleExport = async (format: string, extension: string) => {
         setLoadingMap(prev => ({ ...prev, [format]: true }));
+        let succeeded = false;
+        let lastPercent = -1;
+        let fakeTimer: number | null = null;
+        let fakeProgress = 0;
+        const formatLabelMap: Record<string, string> = {
+            pdf: "PDF",
+            html: "HTML",
+            images: "图片",
+            pptx: "PPT",
+        };
+        const label = formatLabelMap[format] || "文件";
+
+        const stopFake = () => {
+            if (fakeTimer !== null) {
+                window.clearInterval(fakeTimer);
+                fakeTimer = null;
+            }
+        };
+
+        const startFake = () => {
+            if (fakeTimer !== null) return;
+            fakeTimer = window.setInterval(() => {
+                if (fakeProgress >= 80) {
+                    stopFake();
+                    return;
+                }
+                const step = 1;
+                fakeProgress = Math.min(80, fakeProgress + step);
+                if (fakeProgress > lastPercent) {
+                    lastPercent = fakeProgress;
+                    onProgress?.({
+                        status: "progress",
+                        percent: fakeProgress,
+                        label,
+                    });
+                }
+            }, 500);
+        };
+
+        onProgress?.({ status: "start", percent: 0, label });
 
         try {
-            const response = await fetch("/api/ppt/export", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
+            const { blob, filename } = await new Promise<{ blob: Blob; filename: string }>((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open("POST", "/api/ppt/export", true);
+                xhr.responseType = "blob";
+                xhr.setRequestHeader("Content-Type", "application/json");
+
+                xhr.onloadstart = () => {
+                    startFake();
+                };
+
+                xhr.onprogress = (event) => {
+                    if (event.lengthComputable && event.total > 0) {
+                        const rawPercent = Math.round((event.loaded / event.total) * 100);
+                        const percent = Math.min(80, rawPercent);
+                        if (percent !== lastPercent) {
+                            lastPercent = percent;
+                            stopFake();
+                            onProgress?.({
+                                status: "progress",
+                                percent,
+                                label,
+                            });
+                        }
+                    } else {
+                        startFake();
+                    }
+                };
+
+                xhr.onerror = () => {
+                    reject(new Error("网络错误，请稍后重试"));
+                };
+
+                xhr.onload = () => {
+                    const ok = xhr.status >= 200 && xhr.status < 300;
+                    const fallbackName = `${title}${extension}`;
+                    if (!ok) {
+                        const errorBlob = xhr.response;
+                        if (errorBlob && typeof errorBlob.text === "function") {
+                            errorBlob.text().then((text: string) => {
+                                try {
+                                    const data = JSON.parse(text);
+                                    reject(new Error(data.detail || "导出失败"));
+                                } catch {
+                                    reject(new Error(text || "导出失败"));
+                                }
+                            }).catch(() => reject(new Error("导出失败")));
+                        } else {
+                            reject(new Error("导出失败"));
+                        }
+                        return;
+                    }
+
+                    const contentDisposition = xhr.getResponseHeader("Content-Disposition");
+                    const filename = extractFilename(contentDisposition, fallbackName);
+                    resolve({ blob: xhr.response, filename });
+                };
+
+                xhr.send(JSON.stringify({
                     project_id: projectId,
                     version_id: versionId,
                     format: format
-                })
+                }));
             });
 
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.detail || "导出失败");
-            }
+            stopFake();
+            onProgress?.({ status: "complete", percent: 100, label: "下载完成" });
 
-            // 获取文件名
-            const contentDisposition = response.headers.get("Content-Disposition");
-            const fallbackName = `${title}${extension}`;
-            const filename = extractFilename(contentDisposition, fallbackName);
-
-            // 下载文件
-            const blob = await response.blob();
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.href = url;
@@ -112,13 +209,19 @@ export default function DownloadPopover({ projectId, versionId, title, disabled 
             a.click();
             window.URL.revokeObjectURL(url);
             document.body.removeChild(a);
+            succeeded = true;
 
         } catch (err) {
             console.error("Export failed:", err);
-            // 这里可以加一个 toast 通知用户失败，暂时 log
-            alert("导出失败，请稍后重试");
+            const message = err instanceof Error ? err.message : "导出失败，请稍后重试";
+            stopFake();
+            onProgress?.({ status: "error", label: message });
+            toast.error("导出失败", { description: message });
         } finally {
             setLoadingMap(prev => ({ ...prev, [format]: false }));
+        }
+        if (succeeded) {
+            toast.success("下载成功", { description: "文件已保存到本地" });
         }
     };
 

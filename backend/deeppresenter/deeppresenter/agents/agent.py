@@ -111,6 +111,17 @@ class Agent:
         for tool_name, tool in agent_env._tools_dict.items():
             if tool_name in role_config.include_tools:
                 self.tools.append(tool)
+        # Deduplicate tools by function name to avoid LLM API errors
+        if self.tools:
+            seen_tools: set[str] = set()
+            deduped_tools: list[dict] = []
+            for tool in self.tools:
+                name = tool.get("function", {}).get("name")
+                if not name or name in seen_tools:
+                    continue
+                seen_tools.add(name)
+                deduped_tools.append(tool)
+            self.tools = deduped_tools
         if language not in role_config.system:
             raise ValueError(f"Language '{language}' not found in system prompts")
         self.system = role_config.system[language]

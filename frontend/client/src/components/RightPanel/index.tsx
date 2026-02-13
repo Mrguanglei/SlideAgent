@@ -66,6 +66,11 @@ interface RightPanelProps {
   onShare: () => void;
   onPlay: () => void;
   onFullscreen: () => void;
+  onDownloadProgress?: (payload: {
+    status: "start" | "progress" | "complete" | "error";
+    percent?: number;
+    label?: string;
+  }) => void;
   isLoading?: boolean;
 }
 
@@ -101,6 +106,7 @@ export default function RightPanel({
   onShare,
   onPlay,
   onFullscreen,
+  onDownloadProgress,
   isLoading = false,
 }: RightPanelProps) {
   const taskPlanContentRef = useRef<HTMLDivElement>(null);
@@ -243,6 +249,7 @@ export default function RightPanel({
                       projectId={pptProject.id}
                       title={pptProject.title}
                       disabled={isLoading}
+                      onProgress={onDownloadProgress}
                     />
                   ) : (
                     <button

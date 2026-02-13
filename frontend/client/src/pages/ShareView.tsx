@@ -103,20 +103,20 @@ export default function ShareView() {
   const [fullMessages, setFullMessages] = useState<Message[]>([]);
   const [playbackEnabled, setPlaybackEnabled] = useState(true);
   const [playbackSpeed] = useState(3);
-
+  
   // 右侧面板状态
   const [showRightPanel, setShowRightPanel] = useState(false);
   const [rightPanelType, setRightPanelType] = useState<RightPanelType>(null);
-
+  
   // 任务规划状态
   const [taskPlan, setTaskPlan] = useState<TaskPlan | null>(null);
-
+  
   // 搜索状态
   const [searchRounds, setSearchRounds] = useState<SearchRound[]>([]);
   const [currentSearchRound, setCurrentSearchRound] = useState(1);
   const [imageSearchRounds, setImageSearchRounds] = useState<ImageSearchRound[]>([]);
   const [currentImageSearchRound, setCurrentImageSearchRound] = useState(1);
-
+  
   // PPT 状态
   const [pptOutline, setPptOutline] = useState("");
   const [pptHtmlCode, setPptHtmlCode] = useState("");
@@ -138,7 +138,7 @@ export default function ShareView() {
       try {
         const data = await getShareData(shareId);
         setShareData(data);
-
+        
         // 转换消息格式为 MessageItem 组件所需的格式
         const convertedMessages: Message[] = data.messages.map((msg: ShareMessage) => {
           const toolCalls: ToolCall[] = msg.tool_calls?.map((tc: ShareToolCall) => {
@@ -192,7 +192,7 @@ export default function ShareView() {
         });
 
         setFullMessages(convertedMessages);
-
+        
         // 提取任务规划、搜索轮次和PPT数据
         if (data.messages) {
           // 提取任务规划
@@ -208,7 +208,7 @@ export default function ShareView() {
               }
             }
           }
-
+          
           // 提取搜索轮次
           const extractedRounds: SearchRound[] = [];
           for (const msg of data.messages) {
@@ -233,7 +233,7 @@ export default function ShareView() {
             }
           }
           setSearchRounds(extractedRounds);
-
+          
           // 提取图片搜索轮次
           const extractedImageRoundsMap = new Map<number, ImageSearchRound>();
           for (const msg of data.messages) {
@@ -276,11 +276,11 @@ export default function ShareView() {
             }
           }
         }
-
+        
         // 处理PPT项目
         if (data.ppt_project) {
           const project = data.ppt_project;
-
+          
           // 转换为前端PPTProject格式
           const convertedProject: PPTProject = {
             id: project.id,
@@ -310,9 +310,9 @@ export default function ShareView() {
               })),
             },
           };
-
+          
           setPptProject(convertedProject);
-
+          
           // 生成HTML代码
           if (project.slides && project.slides.length > 0) {
             const htmlCode = project.slides
@@ -321,7 +321,7 @@ export default function ShareView() {
               .join("\n");
             setPptHtmlCode(htmlCode);
           }
-
+          
           // 默认打开PPT预览面板
           setRightPanelType("ppt_preview");
           setShowRightPanel(true);
@@ -468,7 +468,7 @@ export default function ShareView() {
   }, [messages]);
 
   // 空函数用于只读模式
-  const noopFunction = () => { };
+  const noopFunction = () => {};
 
   const handleOpenPanel = (type: RightPanelType) => {
     setRightPanelType(type);
@@ -549,9 +549,9 @@ export default function ShareView() {
                   <MessageItem
                     key={message.id}
                     message={message}
-                    onOpenPanel={handleOpenPanel}
-                    onConfirmInfo={noopFunction}
-                    currentTopic={shareData.conversation.title}
+                      onOpenPanel={handleOpenPanel}
+                      onConfirmInfo={noopFunction}
+                      currentTopic={shareData.conversation.title}
                     autoConfirmCountdown={null}
                     onCancelAutoConfirm={noopFunction}
                     isFirstAiMessage={isFirstAiMessage}
