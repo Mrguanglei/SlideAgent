@@ -210,6 +210,10 @@ All forms of contributions are welcome! If you have any ideas or suggestions, fe
 
 ## 📄 License
 
-This project follows the **[AGPL-3.0 License](https://www.gnu.org/licenses/agpl-3.0.html)**. For learning and communication purposes only, commercial use is prohibited.
+This project is licensed under **[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)** 
+(Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International).
 
+- **Attribution** — You must give appropriate credit
+- **NonCommercial** — You may not use the material for commercial purposes
+- **ShareAlike** — If you remix, transform, or build upon the material, you must distribute your contributions under the same license
 ## If this helps you, please consider starring the repo ✨
