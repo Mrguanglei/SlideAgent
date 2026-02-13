@@ -22,7 +22,10 @@
 
 ![SlideAgent Homepage](images/home.png)
 
+## 🎉 News
 
+- **\[2026/02\]** Add The Function of Online Search
+- **\[2026/01\]** "See-What-You-Get" PPT Export Function
 
 ## ✨ Highlights
 
