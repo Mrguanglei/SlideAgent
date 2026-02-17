@@ -86,10 +86,6 @@ Welcome to try it out and provide feedback!
    docker-compose up --build -d
    ```
 
-4. **Access the application**
-   - **Frontend:** [http://localhost:3000](http://localhost:3000)
-   - **Backend API:** [http://localhost:8000/docs](http://localhost:8000/docs)
-
 ## Supported Model Providers API (Tested)
 
 | Provider/Series | Model | Status | Notes |
