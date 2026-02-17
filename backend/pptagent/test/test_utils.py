@@ -2,9 +2,9 @@ import os
 import tempfile
 
 import pytest
-from src.utils import get_json_from_response, package_join, ppt_to_images
+from pptagent.utils import get_json_from_response, package_join, ppt_to_images
 
-from test.conftest import test_config
+from .conftest import test_config
 
 
 def test_package_data():

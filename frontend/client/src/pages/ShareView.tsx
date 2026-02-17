@@ -17,82 +17,84 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams } from "wouter";
 import { Loader2, AlertCircle, Send, Globe, Paperclip } from "lucide-react";
-import { getShareData } from "@/lib/api";
+import {
+  getShareData,
+  type ShareData,
+  type ShareMessageData,
+  type ShareToolCallData,
+  type ShareSearchRoundData,
+  type ShareTaskPlanData,
+  type ShareSlideData,
+} from "@/lib/api";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import MessageItem from "@/components/MessageItem";
 import RightPanel from "@/components/RightPanel";
 import type { Message, ToolCall, TaskPlan, SearchRound, ImageSearchRound, RightPanelType, PPTViewMode, PPTProject } from "@/types";
 
-interface ShareMessage {
-  id: number;
-  role: string;
-  content: string;
-  created_at: string;
-  tool_calls: ShareToolCall[];
-}
+const normalizeToolType = (toolType: string): ToolCall["type"] => {
+  if (toolType === "search" || toolType === "web_search") return "web_search";
+  if (toolType === "task_plan") return "task_plan";
+  if (toolType === "image_search") return "image_search";
+  if (toolType === "supplement_info") return "supplement_info";
+  if (toolType === "ppt_outline") return "ppt_outline";
+  if (toolType === "ppt_generate") return "ppt_generate";
+  if (toolType === "deep_thinking") return "deep_thinking";
+  return "web_search";
+};
 
-interface ShareToolCall {
-  id: number;
-  tool_type: string;
-  tool_name: string;
-  status: string;
-  arguments: any;
-  result: any;
-  search_rounds?: SearchRound[];
-  task_plan?: TaskPlan;
-}
+const normalizeToolStatus = (status: string): ToolCall["status"] => {
+  if (status === "pending") return "pending";
+  if (status === "confirmed") return "confirmed";
+  if (status === "auto_execute") return "auto_execute";
+  if (status === "running") return "running";
+  if (status === "completed") return "completed";
+  if (status === "error") return "error";
+  return "completed";
+};
 
-interface SearchRoundData {
-  id: number;
-  round_number: number;
-  query: string;
-  thinking: string;
-  results: SearchResultData[];
-}
+const normalizeTaskPlan = (plan: ShareTaskPlanData | undefined): TaskPlan | undefined => {
+  if (!plan) return undefined;
+  const rawSteps = Array.isArray(plan.steps) ? plan.steps : [];
+  const steps = rawSteps.map((step, index) => {
+    if (typeof step === "string") {
+      return { id: index + 1, text: step };
+    }
+    if (step && typeof step === "object") {
+      const value = step as Record<string, unknown>;
+      const idValue = value.id;
+      const textValue = value.text;
+      return {
+        id: typeof idValue === "number" ? idValue : index + 1,
+        text: typeof textValue === "string" ? textValue : JSON.stringify(value),
+      };
+    }
+    return { id: index + 1, text: String(step) };
+  });
 
-interface SearchResultData {
-  id: number;
-  title: string;
-  url: string;
-  snippet: string;
-}
-
-interface TaskPlanData {
-  id: number;
-  plan_content: string;
-  steps: any;
-}
-
-interface PPTProjectData {
-  id: number;
-  title: string;
-  outline_content: string;
-  slides: Slide[];
-}
-
-interface Slide {
-  id: number;
-  page_number: number;
-  page_title: string;
-  html_content: string;
-}
-
-interface ShareData {
-  conversation: {
-    id: number;
-    uuid: string;
-    title: string;
-    created_at: string;
+  return {
+    streamContent: plan.plan_content || undefined,
+    steps,
   };
-  messages: ShareMessage[];
-  ppt_project: PPTProjectData | null;
-  share_info: {
-    share_id: string;
-    view_count: number;
-    created_at: string;
-    expires_at: string;
-  };
-}
+};
+
+const normalizeImageResults = (images: unknown): ImageSearchRound["images"] => {
+  if (!Array.isArray(images)) return [];
+  const normalized: ImageSearchRound["images"] = [];
+  for (const image of images) {
+    if (!image || typeof image !== "object") continue;
+    const value = image as Record<string, unknown>;
+    const url = typeof value.url === "string" ? value.url : "";
+    if (!url) continue;
+    normalized.push({
+      url,
+      description: typeof value.description === "string" ? value.description : undefined,
+      width: typeof value.width === "number" ? value.width : undefined,
+      height: typeof value.height === "number" ? value.height : undefined,
+      local_path: typeof value.local_path === "string" ? value.local_path : undefined,
+    });
+  }
+  return normalized;
+};
 
 export default function ShareView() {
   const { shareId } = useParams<{ shareId: string }>();
@@ -140,51 +142,48 @@ export default function ShareView() {
         setShareData(data);
         
         // 转换消息格式为 MessageItem 组件所需的格式
-        const convertedMessages: Message[] = data.messages.map((msg: ShareMessage) => {
-          const toolCalls: ToolCall[] = msg.tool_calls?.map((tc: ShareToolCall) => {
-            const normalizedToolType =
-              tc.tool_type === "search" ? "web_search" : tc.tool_type;
+        const convertedMessages: Message[] = data.messages.map((msg: ShareMessageData) => {
+          const toolCalls: ToolCall[] = (msg.tool_calls || []).map((tc: ShareToolCallData) => {
+            const normalizedToolType = normalizeToolType(tc.tool_type);
             // 构建工具调用数据
-            const toolData: any = {
+            const toolData: ToolCall["data"] = {
               ...(tc.arguments || {}),
               ...(tc.result || {}),
             };
 
             // 处理搜索轮次
             if (tc.search_rounds && tc.search_rounds.length > 0) {
-              toolData.searchRounds = tc.search_rounds.map((sr: SearchRoundData) => ({
+              toolData.searchRounds = tc.search_rounds.map((sr: ShareSearchRoundData) => ({
                 round: sr.round_number,
                 query: sr.query,
                 thinking: sr.thinking,
-                results: sr.results?.map((r: SearchResultData) => ({
+                results: (sr.results || []).map((r) => ({
                   title: r.title,
                   url: r.url,
                   snippet: r.snippet,
-                })) || [],
+                })),
                 isCompleted: true,
               }));
             }
 
             // 处理任务规划
             if (tc.task_plan) {
-              toolData.taskPlan = {
-                content: tc.task_plan.plan_content,
-                steps: tc.task_plan.steps || [],
-              };
+              toolData.taskPlan = normalizeTaskPlan(tc.task_plan);
             }
 
             return {
               id: tc.id.toString(),
-              type: normalizedToolType as any,
+              type: normalizedToolType,
               name: tc.tool_name,
-              status: tc.status as any,
+              status: normalizeToolStatus(tc.status),
               data: toolData,
             };
-          }) || [];
+          });
 
+          const role: Message["role"] = msg.role === "user" ? "user" : "assistant";
           return {
             id: msg.id.toString(),
-            role: msg.role as "user" | "assistant",
+            role,
             content: msg.content,
             timestamp: new Date(msg.created_at).getTime(),
             toolCalls,
@@ -200,10 +199,7 @@ export default function ShareView() {
             if (msg.tool_calls) {
               for (const tc of msg.tool_calls) {
                 if (tc.tool_type === "task_plan" && tc.task_plan) {
-                  setTaskPlan({
-                    content: tc.task_plan.plan_content,
-                    steps: tc.task_plan.steps || [],
-                  });
+                  setTaskPlan(normalizeTaskPlan(tc.task_plan) || null);
                 }
               }
             }
@@ -220,11 +216,11 @@ export default function ShareView() {
                       round: sr.round_number,
                       query: sr.query,
                       thinking: sr.thinking,
-                      results: sr.results?.map((r: any) => ({
+                      results: (sr.results || []).map((r) => ({
                         title: r.title,
                         url: r.url,
                         snippet: r.snippet,
-                      })) || [],
+                      })),
                       isCompleted: true,
                     });
                   }
@@ -240,10 +236,14 @@ export default function ShareView() {
             if (msg.tool_calls) {
               for (const tc of msg.tool_calls) {
                 if (tc.tool_type === "image_search") {
-                  const rawRound = tc.arguments?.round ?? tc.result?.round ?? 1;
+                  const args = tc.arguments || {};
+                  const result = tc.result || {};
+                  const rawRound = args.round ?? result.round ?? 1;
                   const round = typeof rawRound === "number" ? rawRound : Number(rawRound) || 1;
-                  const query = tc.arguments?.query || tc.result?.query || "";
-                  const images = tc.result?.images || tc.arguments?.images || [];
+                  const query = (typeof args.query === "string" ? args.query : undefined)
+                    || (typeof result.query === "string" ? result.query : "")
+                    || "";
+                  const images = normalizeImageResults(result.images ?? args.images);
                   const existing = extractedImageRoundsMap.get(round);
                   if (existing) {
                     existing.images = [...existing.images, ...images];
@@ -269,8 +269,9 @@ export default function ShareView() {
           for (const msg of data.messages) {
             if (msg.tool_calls) {
               for (const tc of msg.tool_calls) {
-                if (tc.tool_type === "ppt_outline" && tc.result?.outline) {
-                  setPptOutline(tc.result.outline);
+                const outline = tc.result?.outline;
+                if (tc.tool_type === "ppt_outline" && typeof outline === "string" && outline) {
+                  setPptOutline(outline);
                 }
               }
             }
@@ -282,31 +283,43 @@ export default function ShareView() {
           const project = data.ppt_project;
           
           // 转换为前端PPTProject格式
+          const createdAt = data.share_info.created_at || new Date().toISOString();
+          const slides = project.slides || [];
           const convertedProject: PPTProject = {
             id: project.id,
             conversation_id: data.conversation.id,
             title: project.title,
-            outline_content: project.outline_content,
+            outline_content: project.outline_content || undefined,
+            created_at: createdAt,
+            updated_at: createdAt,
             versions: [{
               id: 1,
               version_number: 1,
               version_name: "V1",
-              slides: project.slides.map((slide: Slide) => ({
+              created_at: createdAt,
+              slides: slides.map((slide: ShareSlideData) => ({
                 id: slide.id,
+                version_id: 1,
                 page_number: slide.page_number,
-                page_title: slide.page_title,
+                page_title: slide.page_title || undefined,
                 html_content: slide.html_content,
+                created_at: createdAt,
+                updated_at: createdAt,
               })),
             }],
             current_version: {
               id: 1,
               version_number: 1,
               version_name: "V1",
-              slides: project.slides.map((slide: Slide) => ({
+              created_at: createdAt,
+              slides: slides.map((slide: ShareSlideData) => ({
                 id: slide.id,
+                version_id: 1,
                 page_number: slide.page_number,
-                page_title: slide.page_title,
+                page_title: slide.page_title || undefined,
                 html_content: slide.html_content,
+                created_at: createdAt,
+                updated_at: createdAt,
               })),
             },
           };
@@ -314,10 +327,10 @@ export default function ShareView() {
           setPptProject(convertedProject);
           
           // 生成HTML代码
-          if (project.slides && project.slides.length > 0) {
-            const htmlCode = project.slides
-              .sort((a: Slide, b: Slide) => a.page_number - b.page_number)
-              .map((slide: Slide) => slide.html_content)
+          if (slides.length > 0) {
+            const htmlCode = slides
+              .sort((a: ShareSlideData, b: ShareSlideData) => a.page_number - b.page_number)
+              .map((slide: ShareSlideData) => slide.html_content)
               .join("\n");
             setPptHtmlCode(htmlCode);
           }

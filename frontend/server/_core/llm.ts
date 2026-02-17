@@ -218,6 +218,9 @@ const assertApiKey = () => {
   if (!ENV.forgeApiKey) {
     throw new Error("OPENAI_API_KEY is not configured");
   }
+  if (!ENV.forgeModel) {
+    throw new Error("BUILT_IN_FORGE_MODEL or PPTAGENT_MODEL is not configured");
+  }
 };
 
 const normalizeResponseFormat = ({
@@ -280,7 +283,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   } = params;
 
   const payload: Record<string, unknown> = {
-    model: "gemini-2.5-flash",
+    model: ENV.forgeModel,
     messages: messages.map(normalizeMessage),
   };
 

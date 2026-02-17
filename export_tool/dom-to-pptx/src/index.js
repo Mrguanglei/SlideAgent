@@ -641,7 +641,7 @@ function prepareRenderItem(
           textParts: [
             {
               text: textContent,
-              options: getTextStyle(style, config.scale),
+              options: getTextStyle(style, config.scale, textContent),
             },
           ],
           options: {
@@ -1005,7 +1005,7 @@ function prepareRenderItem(
               textParts: [
                 {
                   text: iconText,
-                  options: getTextStyle(style, config.scale),
+                  options: getTextStyle(style, config.scale, iconText),
                 },
               ],
               options: {
@@ -1230,7 +1230,7 @@ function prepareRenderItem(
       const pseudoStyle = window.getComputedStyle(node, '::before');
       textParts.push({
         text: pseudoBefore,
-        options: getTextStyle(pseudoStyle, config.scale),
+        options: getTextStyle(pseudoStyle, config.scale, pseudoBefore),
       });
     }
 
@@ -1273,7 +1273,7 @@ function prepareRenderItem(
       if (nodeStyle.textTransform === 'lowercase') textVal = textVal.toLowerCase();
 
       if (textVal.length > 0) {
-        const textOpts = getTextStyle(nodeStyle, config.scale);
+        const textOpts = getTextStyle(nodeStyle, config.scale, textVal);
 
         // Apply pending soft break from a preceding <br>
         if (softBreakNext) {
@@ -1297,7 +1297,7 @@ function prepareRenderItem(
       const pseudoStyle = window.getComputedStyle(node, '::after');
       textParts.push({
         text: pseudoAfter,
-        options: getTextStyle(pseudoStyle, config.scale),
+        options: getTextStyle(pseudoStyle, config.scale, pseudoAfter),
       });
     }
 
@@ -1606,7 +1606,7 @@ function collectListParts(node, parentStyle, scale) {
       if (cleanContent.trim()) {
         parts.push({
           text: cleanContent + ' ', // Add space after icon
-          options: getTextStyle(window.getComputedStyle(node), scale),
+          options: getTextStyle(window.getComputedStyle(node), scale, cleanContent),
         });
       }
     }
@@ -1621,7 +1621,7 @@ function collectListParts(node, parentStyle, scale) {
         const styleToUse = node.nodeType === 1 ? window.getComputedStyle(node) : parentStyle;
         parts.push({
           text: val,
-          options: getTextStyle(styleToUse, scale),
+          options: getTextStyle(styleToUse, scale, val),
         });
       }
     } else if (child.nodeType === 1) {

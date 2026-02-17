@@ -21,6 +21,8 @@ export interface ConversationDetail {
   conversation: Conversation;
   session_id?: string;
   task_status?: string;
+  active_session_id?: string;
+  active_stage?: string;
   search_mode?: "auto" | "on" | "off";
   messages?: Message[];
   ppt_project?: PPTProject;
@@ -49,9 +51,10 @@ export async function getConversations(
  * 获取对话详情（包含消息和工具调用）
  */
 export async function getConversationDetail(
-  conversationUuid: string
+  conversationUuid: string,
+  signal?: AbortSignal
 ): Promise<ConversationDetail> {
-  const response = await fetch(`${API_BASE}/conversations/uuid/${conversationUuid}`);
+  const response = await fetch(`${API_BASE}/conversations/uuid/${conversationUuid}`, { signal });
   if (!response.ok) {
     throw new Error("Failed to fetch conversation detail");
   }
@@ -309,11 +312,81 @@ export interface ShareResponse {
   expire_days: number;
 }
 
-export interface ShareData {
+export interface ShareConversationData {
+  id: number;
+  uuid: string;
   title: string;
-  slides_html: string[];
   created_at: string;
+}
+
+export interface ShareSearchResultData {
+  id: number;
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+export interface ShareSearchRoundData {
+  id: number;
+  round_number: number;
+  query: string;
+  thinking: string;
+  results: ShareSearchResultData[];
+}
+
+export interface ShareTaskPlanData {
+  id: number;
+  plan_content: string;
+  steps: unknown;
+}
+
+export interface ShareToolCallData {
+  id: number;
+  tool_type: string;
+  tool_name: string;
+  status: string;
+  arguments: Record<string, unknown> | null;
+  result: Record<string, unknown> | null;
+  created_at: string;
+  search_rounds?: ShareSearchRoundData[];
+  task_plan?: ShareTaskPlanData;
+}
+
+export interface ShareMessageData {
+  id: number;
+  conversation_id: number;
+  role: string;
+  content: string;
+  created_at: string;
+  tool_calls: ShareToolCallData[];
+}
+
+export interface ShareSlideData {
+  id: number;
+  page_number: number;
+  page_title: string | null;
+  html_content: string;
+}
+
+export interface SharePPTProjectData {
+  id: number;
+  title: string;
+  outline_content: string | null;
+  slides: ShareSlideData[];
+}
+
+export interface ShareInfoData {
+  share_id: string;
   view_count: number;
+  created_at: string;
+  expires_at: string;
+}
+
+export interface ShareData {
+  conversation: ShareConversationData;
+  messages: ShareMessageData[];
+  ppt_project: SharePPTProjectData | null;
+  share_info: ShareInfoData;
 }
 
 /**

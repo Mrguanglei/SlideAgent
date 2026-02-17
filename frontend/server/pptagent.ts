@@ -15,6 +15,90 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   create_slide: "新增页面",
 };
 
+// PPTAgent 可用工具定义（用于前端测试和工具协议约束）
+export const pptTools = [
+  {
+    type: "function",
+    function: {
+      name: "supplement_info",
+      description: "收集并确认生成 PPT 所需的补充信息",
+      parameters: {
+        type: "object",
+        properties: {
+          topic: { type: "string" },
+          audienceQuestion: { type: "string" },
+          audienceOptions: { type: "array", items: { type: "string" } },
+          modulesQuestion: { type: "string" },
+          modulesOptions: { type: "array", items: { type: "string" } },
+          styleQuestion: { type: "string" },
+          styleOptions: { type: "array", items: { type: "string" } },
+          emphasisQuestion: { type: "string" },
+          emphasisPlaceholder: { type: "string" },
+        },
+        required: ["topic", "audienceOptions", "modulesOptions", "styleOptions"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "task_plan",
+      description: "输出任务规划和执行步骤",
+      parameters: {
+        type: "object",
+        properties: {
+          coreRequirement: { type: "string" },
+          details: { type: "array", items: { type: "string" } },
+          steps: { type: "array", items: { type: "object" } },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "web_search",
+      description: "执行网页搜索并返回结果",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "image_search",
+      description: "执行图片搜索并返回结果",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_slide",
+      description: "生成单页幻灯片 HTML",
+      parameters: {
+        type: "object",
+        properties: {
+          pageNumber: { type: "number" },
+          title: { type: "string" },
+          content: { type: "string" },
+          htmlCode: { type: "string" },
+        },
+        required: ["pageNumber", "title", "content"],
+      },
+    },
+  },
+];
+
 // 获取工具显示名称
 function getToolDisplayName(toolName: string): string {
   return TOOL_DISPLAY_NAMES[toolName] || toolName;
@@ -393,8 +477,11 @@ export async function executeTool(
 
     default:
       return {
-        success: true,
-        result: { data: args },
+        success: false,
+        result: {
+          error: `Unknown tool: ${toolName}`,
+          data: args,
+        },
       };
   }
 }

@@ -83,7 +83,11 @@ class TokenTextSplitter:
             try:
                 self.encoder = tiktoken.get_encoding(encoding_name)
             except Exception:
-                self.encoder = tiktoken.get_encoding("cl100k_base")
+                try:
+                    self.encoder = tiktoken.get_encoding("cl100k_base")
+                except Exception:
+                    # 在离线环境或编码下载失败时回退到估算模式
+                    self.encoder = None
         else:
             self.encoder = None
     

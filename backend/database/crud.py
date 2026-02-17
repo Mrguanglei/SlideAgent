@@ -626,6 +626,20 @@ async def get_ppt_slides(
     return await get_slides_by_version(db, version_id)
 
 
+async def get_ppt_slide_by_page(
+    db: AsyncSession,
+    version_id: int,
+    page_number: int,
+) -> Optional[PPTSlide]:
+    """按页码获取版本中的单页幻灯片"""
+    query = select(PPTSlide).where(
+        PPTSlide.version_id == version_id,
+        PPTSlide.page_number == page_number,
+    )
+    result = await db.execute(query)
+    return result.scalar_one_or_none()
+
+
 async def update_ppt_slide(
     db: AsyncSession,
     slide_id: int,
@@ -1016,6 +1030,179 @@ async def get_session_by_conversation(
     return result.scalars().first()
 
 
+async def get_active_session_by_conversation(
+    db: AsyncSession,
+    conversation_id: int
+) -> Optional[Session]:
+    """获取对话当前活跃 session（优先未完成阶段）"""
+    query = (
+        select(Session)
+        .where(
+            Session.conversation_id == conversation_id,
+            Session.stage != "completed",
+        )
+        .order_by(desc(Session.updated_at))
+        .limit(1)
+    )
+    result = await db.execute(query)
+    return result.scalar_one_or_none()
+
+
+async def pause_running_sessions_by_conversation(
+    db: AsyncSession,
+    conversation_id: int,
+    keep_session_id: Optional[str] = None,
+) -> int:
+    """将同一对话中除 keep_session_id 外的 running session 统一置为 paused。"""
+    stmt = (
+        update(Session)
+        .where(
+            Session.conversation_id == conversation_id,
+            Session.task_status == "running",
+        )
+        .values(task_status="paused", updated_at=datetime.utcnow())
+    )
+    if keep_session_id:
+        stmt = stmt.where(Session.id != keep_session_id)
+    result = await db.execute(stmt)
+    updated = result.rowcount or 0
+
+    if updated > 0:
+        try:
+            await db.execute(
+                update(Conversation)
+                .where(Conversation.id == conversation_id)
+                .values(task_status="paused")
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to sync conversation status to paused for conversation %s: %s",
+                conversation_id,
+                e,
+            )
+
+    return updated
+
+
+async def pause_running_sessions(
+    db: AsyncSession,
+    keep_session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> int:
+    """Pause running sessions (optionally scoped by user), excluding keep_session_id."""
+    session_filters = [Session.task_status == "running"]
+    if keep_session_id:
+        session_filters.append(Session.id != keep_session_id)
+
+    candidate_query = select(Session.conversation_id).where(
+        *session_filters,
+        Session.conversation_id.is_not(None),
+    )
+    if user_id is not None:
+        candidate_query = candidate_query.join(
+            Conversation, Conversation.id == Session.conversation_id
+        ).where(Conversation.user_id == user_id)
+
+    candidate_rows = await db.execute(candidate_query)
+    conversation_ids = {
+        row[0] for row in candidate_rows.all() if row[0] is not None
+    }
+
+    stmt = (
+        update(Session)
+        .where(*session_filters)
+        .values(task_status="paused", updated_at=datetime.utcnow())
+    )
+    if user_id is not None:
+        stmt = stmt.where(
+            Session.conversation_id.in_(
+                select(Conversation.id).where(Conversation.user_id == user_id)
+            )
+        )
+    result = await db.execute(stmt)
+    updated = result.rowcount or 0
+
+    if conversation_ids:
+        try:
+            await db.execute(
+                update(Conversation)
+                .where(Conversation.id.in_(conversation_ids))
+                .values(task_status="paused")
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to sync paused status for conversations %s: %s",
+                sorted(conversation_ids),
+                e,
+            )
+
+    return updated
+
+
+async def ensure_single_running_session_for_user(
+    db: AsyncSession,
+    user_id: str,
+) -> tuple[Optional[str], int]:
+    """确保同一用户最多只有一个 running session，返回 (保留session_id, 暂停数量)。"""
+    running_rows = await db.execute(
+        select(Session.id, Session.conversation_id)
+        .join(Conversation, Conversation.id == Session.conversation_id)
+        .where(
+            Conversation.user_id == user_id,
+            Session.task_status == "running",
+        )
+        .order_by(desc(Session.updated_at))
+    )
+    running = running_rows.all()
+    if len(running) <= 1:
+        return (running[0][0] if running else None, 0)
+
+    keep_session_id = running[0][0]
+    pause_session_ids = [row[0] for row in running[1:]]
+    pause_conversation_ids = {row[1] for row in running[1:] if row[1] is not None}
+
+    await db.execute(
+        update(Session)
+        .where(Session.id.in_(pause_session_ids))
+        .values(task_status="paused", updated_at=datetime.utcnow())
+    )
+    if pause_conversation_ids:
+        await db.execute(
+            update(Conversation)
+            .where(Conversation.id.in_(pause_conversation_ids))
+            .values(task_status="paused")
+        )
+
+    logger.warning(
+        "Detected %d running sessions for user %s, kept %s and paused %d sessions",
+        len(running),
+        user_id,
+        keep_session_id,
+        len(pause_session_ids),
+    )
+    return keep_session_id, len(pause_session_ids)
+
+
+async def pause_stale_running_sessions(
+    db: AsyncSession,
+    stale_before: datetime,
+    conversation_id: Optional[int] = None,
+) -> int:
+    """将超过阈值未更新的 running session 标记为 paused。"""
+    stmt = (
+        update(Session)
+        .where(
+            Session.task_status == "running",
+            Session.updated_at < stale_before,
+        )
+        .values(task_status="paused", updated_at=datetime.utcnow())
+    )
+    if conversation_id is not None:
+        stmt = stmt.where(Session.conversation_id == conversation_id)
+    result = await db.execute(stmt)
+    return result.rowcount or 0
+
+
 # ==================== Export Caching ====================
 
 async def get_ppt_export(
@@ -1083,5 +1270,3 @@ async def get_knowledge_document(
     query = select(KnowledgeDocument).where(KnowledgeDocument.id == document_id)
     result = await db.execute(query)
     return result.scalar_one_or_none()
-
-

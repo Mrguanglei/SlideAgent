@@ -1,6 +1,6 @@
 from bs4 import BeautifulSoup
 from pptagent_pptx import Presentation
-from src.apis import (
+from pptagent.apis import (
     API_TYPES,
     CodeExecutor,
     markdown,
@@ -8,7 +8,7 @@ from src.apis import (
     replace_para,
 )
 
-from test.conftest import test_config
+from .conftest import test_config
 
 
 def test_api_docs():

@@ -1,12 +1,12 @@
 from os.path import join
 
 import pytest
-from src.document import Document
-from src.multimodal import ImageLabler
-from src.pptgen import PPTAgent
-from src.presentation import Presentation
+from pptagent.document import Document
+from pptagent.multimodal import ImageLabler
+from pptagent.pptgen import PPTAgent
+from pptagent.presentation import Presentation
 
-from test.conftest import test_config
+from .conftest import test_config
 
 
 @pytest.mark.asyncio

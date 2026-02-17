@@ -17,9 +17,10 @@ import logging
 import asyncio
 import tempfile
 import re
+import hashlib
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Depends
@@ -89,10 +90,21 @@ async def generate_conversation_title_llm(text: str, max_len: int = 32) -> str:
 用户输入：{text[:200]}
 """
     try:
-        response = await call_llm_api([
-            {"role": "system", "content": "你是标题提炼助手，只输出标题。"},
-            {"role": "user", "content": prompt},
-        ])
+        response = await asyncio.wait_for(
+            call_llm_api_with_config(
+                messages=[
+                    {"role": "system", "content": "你是标题提炼助手，只输出标题。"},
+                    {"role": "user", "content": prompt},
+                ],
+                model=Config.LLM_MODEL,
+                base_url=Config.LLM_BASE_URL,
+                api_key=Config.LLM_API_KEY,
+                temperature=0.3,
+                timeout_seconds=12.0,
+                max_retries=1,
+            ),
+            timeout=14.0,
+        )
         if response:
             title = normalize_conversation_title(response, max_len=max_len)
             if title:
@@ -127,10 +139,21 @@ async def generate_ppt_title_llm(
 {context}
 """
     try:
-        response = await call_llm_api([
-            {"role": "system", "content": "你是标题提炼助手，只输出标题。"},
-            {"role": "user", "content": prompt},
-        ])
+        response = await asyncio.wait_for(
+            call_llm_api_with_config(
+                messages=[
+                    {"role": "system", "content": "你是标题提炼助手，只输出标题。"},
+                    {"role": "user", "content": prompt},
+                ],
+                model=Config.LLM_MODEL,
+                base_url=Config.LLM_BASE_URL,
+                api_key=Config.LLM_API_KEY,
+                temperature=0.3,
+                timeout_seconds=15.0,
+                max_retries=1,
+            ),
+            timeout=18.0,
+        )
         title = clean_title_simple(response or "", max_len=max_len, fallback="")
         if title:
             return title
@@ -143,7 +166,7 @@ async def generate_ppt_title_llm(
 from utils.config import Config
 
 # 导入数据库
-from database.connection import init_db, get_db
+from database.connection import init_db, get_db, get_db_session
 from database import crud
 
 # 导入路由
@@ -160,7 +183,12 @@ from routers import (
 from services.knowledge.document_parser import DocumentParser
 
 # 导入服务
-from services.llm import call_llm_api, call_llm_api_stream, extract_core_topic
+from services.llm import (
+    call_llm_api,
+    call_llm_api_stream,
+    call_llm_api_with_config,
+    extract_core_topic,
+)
 from services.search import (
     generate_search_queries,
     should_use_web_search,
@@ -181,8 +209,21 @@ from services.ppt_generator import (
     parse_num_pages,
     run_slide_design_agent,
     replace_image_placeholders,
+    enforce_slide_layout_bounds,
 )
 from services.resource_inliner import inline_all_resources
+from services.visual_review import (
+    refine_slide_with_visual_review,
+    refine_slide_with_deck_style_review,
+)
+from services.style_consistency import (
+    extract_style_anchor,
+    apply_style_anchor,
+)
+from services.session_guard import (
+    SessionBindingError,
+    resolve_confirm_session_binding,
+)
 
 
 # ==================== 应用生命周期 ====================
@@ -201,6 +242,16 @@ async def lifespan(app: FastAPI):
     # 初始化数据库
     await init_db()
     logger.info("✓ Database initialized")
+
+    # 启动收敛：防止异常中断后残留 running 状态导致多会话“绿点”污染
+    async with get_db_session() as startup_db:
+        paused_count = await crud.pause_running_sessions(startup_db)
+        if paused_count > 0:
+            await startup_db.commit()
+            logger.warning(
+                "Paused %d stale running sessions during startup recovery",
+                paused_count,
+            )
     
     # 初始化知识库任务队列
     from routers.knowledge import init_knowledge_queue
@@ -228,10 +279,10 @@ app = FastAPI(
 # CORS 配置
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=Config.CORS_ALLOWED_ORIGINS,
+    allow_credentials=Config.CORS_ALLOW_CREDENTIALS,
+    allow_methods=Config.CORS_ALLOWED_METHODS,
+    allow_headers=Config.CORS_ALLOWED_HEADERS,
 )
 
 # 注册路由
@@ -250,6 +301,7 @@ class ChatRequest(BaseModel):
     instruction: str
     session_id: Optional[str] = None
     conversation_id: Optional[int] = None  # 新增：关联对话 ID
+    conversation_uuid: Optional[str] = None
     supplement_data: Optional[Dict[str, Any]] = None
     attachments: Optional[List[Dict[str, Any]]] = None
     num_pages: Optional[str] = None
@@ -264,8 +316,92 @@ class ConfirmRequest(BaseModel):
     """确认补充信息请求"""
     session_id: Optional[str] = None
     conversation_id: Optional[int] = None
+    conversation_uuid: Optional[str] = None
     supplement_data: Dict[str, Any]
     search_mode: Optional[str] = None
+
+
+async def _mark_session_not_running_if_needed(
+    session_id: Optional[str],
+    fallback_status: str = "paused",
+) -> None:
+    """Best-effort cleanup to avoid stale running sessions after stream interruption."""
+    if not session_id:
+        return
+
+    try:
+        async with get_db_session() as cleanup_db:
+            current = await crud.get_session(cleanup_db, session_id)
+            if current and current.task_status == "running":
+                await crud.update_session(cleanup_db, session_id, task_status=fallback_status)
+                logger.warning(
+                    "Session %s marked as %s after interrupted stream",
+                    session_id,
+                    fallback_status,
+                )
+    except Exception as exc:
+        logger.error("Failed to cleanup stale running session %s: %s", session_id, exc)
+
+
+async def _stream_with_session_guard(
+    stream: AsyncGenerator[str, None],
+    session_id: Optional[str],
+    conversation_id: Optional[int] = None,
+    conversation_uuid: Optional[str] = None,
+) -> AsyncGenerator[str, None]:
+    """Wrap stream generator and ensure running status is cleared on abnormal exit."""
+    def _inject_scope(chunk: str) -> str:
+        if not chunk.startswith("data: "):
+            return chunk
+        payload = chunk[6:].strip()
+        if not payload:
+            return chunk
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            return chunk
+        if not isinstance(data, dict):
+            return chunk
+        if session_id:
+            data.setdefault("session_id", session_id)
+        if conversation_id:
+            data.setdefault("conversation_id", conversation_id)
+        if conversation_uuid:
+            data.setdefault("conversation_uuid", conversation_uuid)
+        return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    try:
+        async for chunk in stream:
+            yield _inject_scope(chunk)
+    except asyncio.CancelledError:
+        logger.warning("SSE stream cancelled for session %s", session_id)
+        await asyncio.shield(
+            _mark_session_not_running_if_needed(session_id, fallback_status="paused")
+        )
+        raise
+    except Exception:
+        logger.exception("SSE stream failed for session %s", session_id)
+        await asyncio.shield(
+            _mark_session_not_running_if_needed(session_id, fallback_status="paused")
+        )
+        raise
+
+
+async def _refresh_conversation_title_async(conversation_id: int, instruction: str) -> None:
+    """Best-effort async title refinement after conversation is created."""
+    try:
+        title = await generate_conversation_title_llm(instruction)
+        if not title:
+            return
+        async with get_db_session() as db:
+            await crud.update_conversation_title(db, conversation_id, title)
+            await db.commit()
+    except Exception as exc:
+        logger.warning(
+            "Failed to refresh conversation title for %s: %s",
+            conversation_id,
+            exc,
+        )
 
 
 # ==================== 核心流式生成函数 ====================
@@ -290,6 +426,30 @@ async def stream_ppt_generation(
     outline_content: str = None
 ):
     """流式生成 PPT 的核心函数"""
+    if db is None:
+        async with get_db_session() as managed_db:
+            async for chunk in stream_ppt_generation(
+                instruction=instruction,
+                session_id=session_id,
+                conversation_id=conversation_id,
+                conversation_uuid=conversation_uuid,
+                is_new_conversation=is_new_conversation,
+                supplement_data=supplement_data,
+                attachments=attachments,
+                num_pages=num_pages,
+                template=template,
+                powerpoint_type=powerpoint_type,
+                convert_type=convert_type,
+                search_mode=search_mode,
+                db=managed_db,
+                save_user_message=save_user_message,
+                search_results=search_results,
+                deep_thinking_content=deep_thinking_content,
+                outline_content=outline_content,
+            ):
+                yield chunk
+        return
+
     logger.info(f"[stream_ppt_generation] START - session={session_id}, conversation={conversation_id}")
     logger.info(f"[stream_ppt_generation] instruction={instruction}, supplement_data={supplement_data}")
 
@@ -312,6 +472,12 @@ async def stream_ppt_generation(
 
     # 从数据库获取或创建会话
     session = None
+    conversation_user_id: Optional[str] = None
+    if db and conversation_id:
+        conversation_obj = await crud.get_conversation(db, conversation_id)
+        if conversation_obj and conversation_obj.user_id:
+            conversation_user_id = conversation_obj.user_id
+
     if db:
         existing_session = await crud.get_session(db, session_id)
         if existing_session:
@@ -346,6 +512,14 @@ async def stream_ppt_generation(
                 "image_results": [],
                 "workspace_dir": str(Path(Config.WORKSPACE_BASE) / session_id),
             }
+
+        # 二次收敛并发 running 状态：覆盖“并发请求同时创建 session”导致的竞态
+        await crud.pause_running_sessions(
+            db,
+            keep_session_id=session_id,
+            user_id=conversation_user_id,
+        )
+        await db.commit()
     else:
         # 没有数据库连接时使用临时会话（兜底）
         session = {
@@ -568,6 +742,17 @@ async def stream_ppt_generation(
                 supplement_info["topic"] = cleaned_topic
         generated_topic = supplement_info.get("topic") if isinstance(supplement_info, dict) else None
 
+        session["stage"] = "waiting_supplement"
+        # 先落库会话状态，避免前端在收到补充信息后立即 confirm 触发 stage 竞态
+        if db:
+            await crud.update_session(
+                db,
+                session_id,
+                stage="waiting_supplement",
+                task_status="idle",
+            )
+            await db.commit()
+
         # 发送补充信息工具调用事件
         tool_call_data = {
             'type': 'tool_call',
@@ -593,12 +778,6 @@ async def stream_ppt_generation(
                 await db.commit()
             except Exception as e:
                 logger.error(f"Failed to save supplement info: {e}")
-        
-        session["stage"] = "waiting_supplement"
-        # 更新数据库中的 session 状态
-        if db:
-            await crud.update_session(db, session_id, stage="waiting_supplement")
-            await db.commit()
         return
     
     # ==================== 阶段 3: 任务规划 ====================
@@ -1030,9 +1209,18 @@ async def stream_ppt_generation(
         
         # 运行 SlideDesign agent
         slide_count = 0
+        generation_failed = False
+        generation_error_message: Optional[str] = None
+        completion_emitted = False
+        seen_slide_signatures: Dict[int, str] = {}
+        saved_slide_ids: Dict[int, int] = {}
+        image_usage_counter: Dict[int, int] = {}
+        style_anchor_tokens: Optional[Dict[str, str]] = None
+        style_anchor_raw_html: Optional[str] = None
+        style_anchor_description: str = ""
 
-        
-        async for event in run_slide_design_agent(
+        stage7_event_timeout_seconds = 180
+        agent_stream = run_slide_design_agent(
             topic=instruction,
             outline_content=session["outline_content"],
             search_results=session["search_results"],
@@ -1042,7 +1230,68 @@ async def stream_ppt_generation(
             powerpoint_type=powerpoint_type,
             image_results=session.get("image_results", []),
             workspace_dir=session.get("workspace_dir", ""),
-        ):
+        )
+
+        while True:
+            try:
+                event = await asyncio.wait_for(
+                    agent_stream.__anext__(),
+                    timeout=stage7_event_timeout_seconds,
+                )
+            except StopAsyncIteration:
+                break
+            except asyncio.TimeoutError:
+                logger.error(
+                    "[Stage 7] No event for %ss. session=%s slides=%s",
+                    stage7_event_timeout_seconds,
+                    session_id,
+                    slide_count,
+                )
+                if (
+                    actual_num_pages
+                    and slide_count >= actual_num_pages
+                    and not completion_emitted
+                ):
+                    completion_emitted = True
+                    project_data = None
+                    if ppt_project:
+                        project_data = {
+                            'id': ppt_project.id,
+                            'conversation_id': ppt_project.conversation_id,
+                            'title': ppt_project.title,
+                            'outline_content': ppt_project.outline_content,
+                            'created_at': ppt_project.created_at.isoformat() if ppt_project.created_at else None,
+                            'updated_at': ppt_project.updated_at.isoformat() if ppt_project.updated_at else None,
+                        }
+                    completion_text = f"PPT生成完成！共 {slide_count} 页。"
+                    complete_msg_data = {
+                        'type': 'ppt_complete',
+                        'role': 'assistant',
+                        'content': completion_text,
+                        'streaming': False,
+                        'project': project_data
+                    }
+                    yield f"data: {json.dumps(complete_msg_data, ensure_ascii=False)}\n\n"
+                    if db and conversation_id:
+                        try:
+                            await crud.create_message(db, conversation_id, "assistant", completion_text)
+                            await db.commit()
+                        except Exception as e:
+                            logger.error(f"Failed to save timeout-complete message: {e}")
+                    break
+                generation_failed = True
+                generation_error_message = (
+                    f"PPT生成在 {stage7_event_timeout_seconds} 秒内无进展，"
+                    "请重试或减少页数后再生成。"
+                )
+                error_data = {
+                    'type': 'error',
+                    'role': 'assistant',
+                    'content': generation_error_message
+                }
+                yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                break
+
             # 生成中也要响应暂停
             if await check_pause():
                 logger.info("[Stage 7] Paused during PPT generation, stopping stream")
@@ -1051,25 +1300,169 @@ async def stream_ppt_generation(
 
             if event_type == "slide":
                 slide_count = event["slide_count"]
-                html_content = event["html_content"]
+                raw_html_content = event["html_content"]
                 description = event.get("description", f"第 {slide_count} 页")
-                
-                # 替换图片占位符（{{img_N}}）和假 URL 为本地图片的 base64
-                try:
-                    html_content = replace_image_placeholders(
-                        html_content, session.get("image_results", [])
-                    )
-                except Exception as e:
-                    logger.error(f"[Stage 7] Failed to replace image placeholders for slide {slide_count}: {e}")
+                image_preferences = [
+                    idx
+                    for idx in (event.get("image_preferences") or [])
+                    if isinstance(idx, int) and idx > 0
+                ]
 
-                # 内联外部资源（图片等）
-                try:
-                    logger.info(f"[Stage 7] Inlining resources for slide {slide_count}...")
-                    html_content = await inline_all_resources(html_content, timeout=30)
-                    logger.info(f"[Stage 7] Resources inlined for slide {slide_count}")
-                except Exception as e:
-                    logger.error(f"[Stage 7] Failed to inline resources for slide {slide_count}: {e}")
-                    # 内联失败不影响整体流程，继续使用原 HTML
+                async def _prepare_slide_html(
+                    source_html: str,
+                    usage_counter_ref: Dict[int, int],
+                    stage_label: str,
+                ) -> str:
+                    prepared_html = source_html
+
+                    # 替换图片占位符（{{img_N}}）和假 URL 为本地图片 base64
+                    try:
+                        prepared_html = replace_image_placeholders(
+                            prepared_html,
+                            session.get("image_results", []),
+                            preferred_image_ids=image_preferences,
+                            usage_counter=usage_counter_ref,
+                            page_number=slide_count,
+                            page_description=description,
+                        )
+                    except Exception as e:
+                        logger.error(
+                            "[Stage 7] Failed to replace image placeholders for slide %s (%s): %s",
+                            slide_count,
+                            stage_label,
+                            e,
+                        )
+
+                    # 约束元素布局边界，避免明显超出 1280x720 画布
+                    try:
+                        prepared_html = enforce_slide_layout_bounds(prepared_html)
+                    except Exception as e:
+                        logger.error(
+                            "[Stage 7] Failed to enforce layout bounds for slide %s (%s): %s",
+                            slide_count,
+                            stage_label,
+                            e,
+                        )
+
+                    # 内联外部资源（图片等）
+                    try:
+                        logger.info(
+                            "[Stage 7] Inlining resources for slide %s (%s)...",
+                            slide_count,
+                            stage_label,
+                        )
+                        prepared_html = await inline_all_resources(prepared_html, timeout=30)
+                        logger.info(
+                            "[Stage 7] Resources inlined for slide %s (%s)",
+                            slide_count,
+                            stage_label,
+                        )
+                    except Exception as e:
+                        logger.error(
+                            "[Stage 7] Failed to inline resources for slide %s (%s): %s",
+                            slide_count,
+                            stage_label,
+                            e,
+                        )
+                        # 内联失败不影响整体流程，继续使用原 HTML
+                    return prepared_html
+
+                review_meta: Optional[Dict[str, Any]] = None
+                refined_raw_html = raw_html_content
+                if Config.VISUAL_REVIEW_ENABLED:
+                    review_usage_counter = dict(image_usage_counter)
+                    refined_raw_html, review_meta = await refine_slide_with_visual_review(
+                        raw_html=raw_html_content,
+                        topic=instruction,
+                        page_description=description,
+                        page_number=slide_count,
+                        prepare_for_render=lambda base_html: _prepare_slide_html(
+                            base_html,
+                            review_usage_counter,
+                            "visual-review",
+                        ),
+                    )
+                    if review_meta:
+                        logger.info(
+                            "[Stage 7] Visual review slide=%s score=%s optimized=%s round=%s",
+                            slide_count,
+                            review_meta.get("score"),
+                            review_meta.get("optimized"),
+                            review_meta.get("round"),
+                        )
+                        if review_meta.get("optimized"):
+                            review_notice = {
+                                "type": "message",
+                                "role": "assistant",
+                                "content": (
+                                    f"第 {slide_count} 页已执行视觉优化，"
+                                    f"当前评分 {review_meta.get('score', 0)}。"
+                                ),
+                                "streaming": False,
+                            }
+                            yield f"data: {json.dumps(review_notice, ensure_ascii=False)}\n\n"
+
+                deck_style_meta: Optional[Dict[str, Any]] = None
+                if not style_anchor_raw_html:
+                    style_anchor_raw_html = refined_raw_html
+                    style_anchor_description = description
+                elif getattr(Config, "DECK_STYLE_REVIEW_ENABLED", True):
+                    deck_review_usage_counter = dict(image_usage_counter)
+                    refined_raw_html, deck_style_meta = await refine_slide_with_deck_style_review(
+                        raw_html=refined_raw_html,
+                        topic=instruction,
+                        page_description=description,
+                        page_number=slide_count,
+                        anchor_raw_html=style_anchor_raw_html,
+                        anchor_page_description=style_anchor_description or "风格锚点页",
+                        prepare_for_render=lambda base_html: _prepare_slide_html(
+                            base_html,
+                            deck_review_usage_counter,
+                            "deck-style-review",
+                        ),
+                    )
+                    if deck_style_meta:
+                        logger.info(
+                            "[Stage 7] Deck style review slide=%s score=%s optimized=%s round=%s",
+                            slide_count,
+                            deck_style_meta.get("score"),
+                            deck_style_meta.get("optimized"),
+                            deck_style_meta.get("round"),
+                        )
+                        if deck_style_meta.get("optimized"):
+                            deck_notice = {
+                                "type": "message",
+                                "role": "assistant",
+                                "content": (
+                                    f"第 {slide_count} 页已执行跨页风格一致性优化，"
+                                    f"当前一致性评分 {deck_style_meta.get('score', 0)}。"
+                                ),
+                                "streaming": False,
+                            }
+                            yield f"data: {json.dumps(deck_notice, ensure_ascii=False)}\n\n"
+
+                if style_anchor_tokens and slide_count > 1:
+                    refined_raw_html = apply_style_anchor(refined_raw_html, style_anchor_tokens)
+
+                html_content = await _prepare_slide_html(
+                    refined_raw_html,
+                    image_usage_counter,
+                    "final",
+                )
+
+                if slide_count == 1 and not style_anchor_tokens:
+                    style_anchor_tokens = extract_style_anchor(html_content)
+
+                content_signature = hashlib.sha1(
+                    html_content.encode("utf-8", errors="ignore")
+                ).hexdigest()
+                if seen_slide_signatures.get(slide_count) == content_signature:
+                    logger.info(
+                        "[Stage 7] Skip duplicated slide event for page %s",
+                        slide_count,
+                    )
+                    continue
+                seen_slide_signatures[slide_count] = content_signature
                 
                 # 注意：静态化已移除，只在导出时进行
                 # 生成时保留动态内容，以便前端预览
@@ -1100,9 +1493,33 @@ async def stream_ppt_generation(
                 # 保存幻灯片到数据库
                 if db and ppt_version:
                     try:
-                        await crud.create_ppt_slide(
-                            db, ppt_version.id, slide_count, html_content, description
-                        )
+                        slide_id = saved_slide_ids.get(slide_count)
+                        if slide_id:
+                            await crud.update_ppt_slide(
+                                db,
+                                slide_id,
+                                html_content=html_content,
+                                page_title=description,
+                            )
+                        else:
+                            existing_slide = await crud.get_ppt_slide_by_page(
+                                db,
+                                ppt_version.id,
+                                slide_count,
+                            )
+                            if existing_slide:
+                                saved_slide_ids[slide_count] = existing_slide.id
+                                await crud.update_ppt_slide(
+                                    db,
+                                    existing_slide.id,
+                                    html_content=html_content,
+                                    page_title=description,
+                                )
+                            else:
+                                created_slide = await crud.create_ppt_slide(
+                                    db, ppt_version.id, slide_count, html_content, description
+                                )
+                                saved_slide_ids[slide_count] = created_slide.id
                         await db.commit()
                     except Exception as e:
                         logger.error(f"Failed to save slide: {e}")
@@ -1143,6 +1560,41 @@ async def stream_ppt_generation(
                     'streaming': False
                 }
                 yield f"data: {json.dumps(thinking_data, ensure_ascii=False)}\n\n"
+
+                # 目标页数已达成时，主动收尾，避免底层 agent 延迟 finalize 造成前端长时间 loading
+                if (
+                    actual_num_pages
+                    and slide_count >= actual_num_pages
+                    and "已达到目标页数" in (event.get("content") or "")
+                    and not completion_emitted
+                ):
+                    completion_emitted = True
+                    project_data = None
+                    if ppt_project:
+                        project_data = {
+                            'id': ppt_project.id,
+                            'conversation_id': ppt_project.conversation_id,
+                            'title': ppt_project.title,
+                            'outline_content': ppt_project.outline_content,
+                            'created_at': ppt_project.created_at.isoformat() if ppt_project.created_at else None,
+                            'updated_at': ppt_project.updated_at.isoformat() if ppt_project.updated_at else None,
+                        }
+                    completion_text = f"PPT生成完成！共 {slide_count} 页。"
+                    complete_msg_data = {
+                        'type': 'ppt_complete',
+                        'role': 'assistant',
+                        'content': completion_text,
+                        'streaming': False,
+                        'project': project_data
+                    }
+                    yield f"data: {json.dumps(complete_msg_data, ensure_ascii=False)}\n\n"
+                    if db and conversation_id:
+                        try:
+                            await crud.create_message(db, conversation_id, "assistant", completion_text)
+                            await db.commit()
+                        except Exception as e:
+                            logger.error(f"Failed to save forced-complete message: {e}")
+                    break
             
             elif event_type == "message":
                 msg_data = {
@@ -1154,6 +1606,7 @@ async def stream_ppt_generation(
                 yield f"data: {json.dumps(msg_data, ensure_ascii=False)}\n\n"
             
             elif event_type == "complete":
+                completion_emitted = True
                 # 准备 project 数据
                 project_data = None
                 if ppt_project:
@@ -1184,14 +1637,47 @@ async def stream_ppt_generation(
                         logger.error(f"Failed to save complete message: {e}")
             
             elif event_type == "error":
+                generation_failed = True
+                generation_error_message = event.get("content") or "生成PPT时出错"
                 error_data = {
                     'type': 'error',
                     'role': 'assistant',
-                    'content': event["content"]
+                    'content': generation_error_message
+                }
+                yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+                break
+
+        try:
+            await agent_stream.aclose()
+        except Exception:
+            pass
+
+        if generation_failed or slide_count <= 0 or not completion_emitted:
+            if not generation_error_message:
+                generation_error_message = "PPT生成未产出有效页面，请稍后重试。"
+                error_data = {
+                    'type': 'error',
+                    'role': 'assistant',
+                    'content': generation_error_message
                 }
                 yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
 
-
+            logger.error(
+                "[Stage 7] PPT generation failed. session=%s slides=%s completion_emitted=%s error=%s",
+                session_id,
+                slide_count,
+                completion_emitted,
+                generation_error_message,
+            )
+            if db:
+                await crud.update_session(
+                    db,
+                    session_id,
+                    stage="generating",
+                    task_status="paused",
+                )
+                await db.commit()
+            return
 
         session["stage"] = "completed"
         # 更新数据库中的 session 状态（任务完成）
@@ -1205,102 +1691,158 @@ async def stream_ppt_generation(
 # ==================== API 端点 ====================
 
 @app.post("/api/chat")
-async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
+async def chat(request: ChatRequest):
     """聊天接口 - 流式返回（支持暂停恢复和上下文理解）"""
     logger.info(f"Chat endpoint called: {request.instruction[:50]}...")
-    
+
     session_id = request.session_id or str(uuid.uuid4())
     conversation_id = request.conversation_id
-    conversation_uuid = None
+    conversation_uuid = request.conversation_uuid
+    conversation_user_id = "default_user"
     is_new_conversation = False
     effective_instruction = request.instruction
 
-    # 检查是否有关联的已暂停 session（通过 conversation_id）
-    if conversation_id:
-        existing_session = await crud.get_session_by_conversation(db, conversation_id)
+    async with get_db_session() as db:
+        # 绑定并校验会话上下文
+        if conversation_id:
+            conversation = await crud.get_conversation(db, conversation_id)
+            if not conversation:
+                raise HTTPException(status_code=404, detail="Conversation not found")
+            if conversation_uuid and conversation_uuid != conversation.uuid:
+                raise HTTPException(status_code=409, detail="对话标识不匹配，请刷新后重试")
+            conversation_uuid = conversation.uuid
+            if conversation.user_id:
+                conversation_user_id = conversation.user_id
+        else:
+            # 先快速创建对话，避免标题模型抖动导致“新建后列表不出现”
+            fallback_topic = extract_core_topic(request.instruction)
+            conversation_title = normalize_conversation_title(
+                fallback_topic,
+                max_len=32,
+            )
+            conversation = await crud.create_conversation(
+                db, title=conversation_title, user_id="default_user"
+            )
+            conversation_id = conversation.id
+            conversation_uuid = conversation.uuid
+            if conversation.user_id:
+                conversation_user_id = conversation.user_id
+            is_new_conversation = True
+            # 异步优化标题，不阻塞首包和会话创建
+            asyncio.create_task(
+                _refresh_conversation_title_async(conversation_id, request.instruction)
+            )
+
+        # 优先使用请求中的 session；不匹配则退回当前对话活跃 session
+        existing_session = None
+        if request.session_id:
+            request_session = await crud.get_session(db, request.session_id)
+            if request_session and request_session.conversation_id == conversation_id:
+                existing_session = request_session
+            elif request_session:
+                logger.warning(
+                    "Ignoring mismatched request session_id=%s for conversation_id=%s",
+                    request.session_id,
+                    conversation_id,
+                )
+
+        if not existing_session and conversation_id:
+            existing_session = await crud.get_active_session_by_conversation(db, conversation_id)
+        if not existing_session and conversation_id:
+            existing_session = await crud.get_session_by_conversation(db, conversation_id)
+
+        if existing_session and existing_session.task_status == "running":
+            # 避免并发活跃流导致跨会话渲染和脏状态
+            await crud.update_session(db, existing_session.id, task_status="paused")
+            existing_session.task_status = "paused"
+            logger.warning(
+                "Session %s was running when a new chat arrived; marked paused first",
+                existing_session.id,
+            )
+
         if existing_session and existing_session.task_status == "paused":
-            logger.info(f"Found paused session for conversation {conversation_id}, analyzing intent...")
-            
-            # 分析用户意图
+            logger.info(
+                "Found paused session for conversation %s, analyzing intent...",
+                conversation_id,
+            )
             intent_result = await analyze_user_intent_for_paused_session(
                 user_message=request.instruction,
                 current_topic=existing_session.topic,
                 current_stage=existing_session.stage,
-                supplement_data=existing_session.supplement_data
+                supplement_data=existing_session.supplement_data,
             )
-            
             action = intent_result.get("action", "resume")
             new_topic = intent_result.get("new_topic", existing_session.topic)
-            
-            logger.info(f"Intent analysis: action={action}, new_topic={new_topic}")
-            
+            logger.info("Intent analysis: action=%s, new_topic=%s", action, new_topic)
+
             if action == "restart":
-                # 完全重新开始：重置 session
-                logger.info(f"Restarting session with new topic: {new_topic}")
                 effective_instruction = new_topic or request.instruction
                 await crud.update_session(
-                    db, existing_session.id,
+                    db,
+                    existing_session.id,
                     topic=effective_instruction,
                     stage="init",
                     task_status="running",
                     supplement_data=None,
                     search_results=None,
                     outline_content=None,
-                    deep_thinking_content=None
+                    deep_thinking_content=None,
                 )
-                await db.commit()
                 session_id = existing_session.id
-                
             elif action == "adjust":
-                # 调整后继续：更新主题但保留已有数据
-                logger.info(f"Adjusting topic to: {new_topic}")
                 effective_instruction = new_topic or request.instruction
                 await crud.update_session(
-                    db, existing_session.id,
+                    db,
+                    existing_session.id,
                     topic=effective_instruction,
-                    task_status="running"
+                    task_status="running",
                 )
-                await db.commit()
                 session_id = existing_session.id
-                
             else:  # resume
-                # 直接恢复：使用现有状态继续
-                logger.info(f"Resuming from stage: {existing_session.stage}")
                 effective_instruction = existing_session.topic
-                await crud.update_session(db, existing_session.id, task_status="running")
-                await db.commit()
+                await crud.update_session(
+                    db,
+                    existing_session.id,
+                    task_status="running",
+                )
                 session_id = existing_session.id
+        elif existing_session and existing_session.stage != "completed":
+            # 非 paused 的历史活跃状态中，用户发起新 chat 时强制起新 session，避免串阶段
+            session_id = str(uuid.uuid4())
+            effective_instruction = request.instruction
 
-    # 如果没有 conversation_id，创建新对话
-    if not conversation_id:
-        try:
-            conversation_title = await generate_conversation_title_llm(request.instruction)
-            conversation = await crud.create_conversation(
-                db, title=conversation_title, user_id="default_user"
-            )
-            conversation_id = conversation.id
-            conversation_uuid = conversation.uuid
-            is_new_conversation = True
-            await db.commit()
-        except Exception as e:
-            logger.error(f"Failed to create conversation: {e}")
+        await crud.pause_running_sessions(
+            db,
+            keep_session_id=session_id,
+            user_id=conversation_user_id,
+        )
+
+        await db.commit()
+
+    stream = stream_ppt_generation(
+        instruction=effective_instruction,
+        session_id=session_id,
+        conversation_id=conversation_id,
+        conversation_uuid=conversation_uuid,
+        is_new_conversation=is_new_conversation,
+        supplement_data=request.supplement_data,
+        attachments=request.attachments,
+        num_pages=request.num_pages,
+        template=request.template,
+        powerpoint_type=request.powerpoint_type,
+        convert_type=request.convert_type,
+        search_mode=request.search_mode,
+        db=None,
+    )
+    guarded_stream = _stream_with_session_guard(
+        stream,
+        session_id=session_id,
+        conversation_id=conversation_id,
+        conversation_uuid=conversation_uuid,
+    )
 
     return StreamingResponse(
-        stream_ppt_generation(
-            instruction=effective_instruction,
-            session_id=session_id,
-            conversation_id=conversation_id,
-            conversation_uuid=conversation_uuid,
-            is_new_conversation=is_new_conversation,
-            supplement_data=request.supplement_data,
-            attachments=request.attachments,
-            num_pages=request.num_pages,
-            template=request.template,
-            powerpoint_type=request.powerpoint_type,
-            convert_type=request.convert_type,
-            search_mode=request.search_mode,
-            db=db,
-        ),
+        guarded_stream,
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -1308,118 +1850,170 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
             "X-Accel-Buffering": "no",
             "X-Session-Id": session_id,
             "X-Conversation-Id": str(conversation_id) if conversation_id else "",
-        }
+            "X-Conversation-UUID": conversation_uuid or "",
+        },
     )
 
 
 @app.post("/api/confirm")
-async def confirm(request: ConfirmRequest, db: AsyncSession = Depends(get_db)):
+async def confirm(request: ConfirmRequest):
     """确认补充信息接口"""
     logger.info(f"Confirm endpoint called: session={request.session_id}, conversation={request.conversation_id}")
+    session_id = request.session_id or ""
+    conversation_id: Optional[int] = request.conversation_id
+    conversation_uuid = request.conversation_uuid
+    conversation_user_id = "default_user"
+    session_topic = ""
 
-    # 检查对话是否已经完成（已有 PPT 项目）
-    if request.conversation_id:
-        existing_project = await crud.get_ppt_project_by_conversation(db, request.conversation_id)
-        if existing_project:
-            logger.warning(f"Conversation {request.conversation_id} already has PPT project, rejecting duplicate confirmation")
-            raise HTTPException(
-                status_code=400,
-                detail="此对话已经完成 PPT 生成，无法重复确认"
+    async with get_db_session() as db:
+        # 检查对话是否已经完成（已有 PPT 项目）
+        if request.conversation_id:
+            existing_project = await crud.get_ppt_project_by_conversation(db, request.conversation_id)
+            if existing_project:
+                logger.warning(
+                    "Conversation %s already has PPT project, rejecting duplicate confirmation",
+                    request.conversation_id,
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail="此对话已经完成 PPT 生成，无法重复确认",
+                )
+
+        session_from_request = None
+        if request.session_id:
+            session_from_request = await crud.get_session(db, request.session_id)
+
+        session_from_conversation = None
+        if request.conversation_id:
+            session_from_conversation = await crud.get_session_by_conversation(db, request.conversation_id)
+
+        try:
+            db_session, session_id, conversation_id, corrected = resolve_confirm_session_binding(
+                request_session_id=request.session_id,
+                request_conversation_id=request.conversation_id,
+                session_from_request=session_from_request,
+                session_from_conversation=session_from_conversation,
+            )
+        except SessionBindingError as e:
+            raise HTTPException(status_code=e.status_code, detail=e.detail) from e
+
+        if corrected:
+            logger.warning(
+                "Confirm session mismatch detected. request.session_id=%s, conversation_id=%s -> resolved session_id=%s",
+                request.session_id,
+                request.conversation_id,
+                session_id,
             )
 
-    # 如果没有 session_id，尝试从 conversation_id 获取或创建新 session
-    session_id = request.session_id
-    if not session_id:
-        # 生成新的 session_id
-        session_id = str(uuid.uuid4())
-        logger.info(f"Generated new session_id: {session_id}")
+        if conversation_id:
+            conversation = await crud.get_conversation(db, conversation_id)
+            if not conversation:
+                raise HTTPException(status_code=404, detail="Conversation not found")
+            if conversation_uuid and conversation_uuid != conversation.uuid:
+                raise HTTPException(status_code=409, detail="对话标识不匹配，请刷新后重试")
+            conversation_uuid = conversation.uuid
+            if conversation.user_id:
+                conversation_user_id = conversation.user_id
 
-    # 从数据库获取 session
-    db_session = await crud.get_session(db, session_id)
-    if not db_session:
-        logger.warning(f"Session {session_id} not found, rejecting confirmation from history")
-        raise HTTPException(
-            status_code=400,
-            detail="无法确认历史对话，请创建新对话"
-        )
+        # 检查 session 状态是否允许确认
+        if db_session.stage != "waiting_supplement":
+            logger.warning(
+                "Session %s is in stage %s, not waiting_supplement",
+                session_id,
+                db_session.stage,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=f"当前状态不允许确认（状态：{db_session.stage}）",
+            )
 
-    # 检查 session 状态是否允许确认
-    if db_session.stage != "waiting_supplement":
-        logger.warning(f"Session {session_id} is in stage {db_session.stage}, not waiting_supplement")
-        raise HTTPException(
-            status_code=400,
-            detail=f"当前状态不允许确认（状态：{db_session.stage}）"
-        )
+        session_topic = db_session.topic
 
-    conversation_id = request.conversation_id or db_session.conversation_id
-    session_topic = db_session.topic
+        generated_topic = request.supplement_data.get("topic")
+        if isinstance(generated_topic, str):
+            generated_topic = strip_think_tags(generated_topic) or generated_topic
+        if generated_topic and generated_topic != session_topic:
+            logger.info("Using AI-generated topic: %s (original: %s)", generated_topic, session_topic)
+            session_topic = generated_topic
+            await crud.update_session(db, session_id, topic=generated_topic)
 
-    # 从 supplement_data 中提取 AI 生成的主题（如果有）
-    generated_topic = request.supplement_data.get("topic")
-    if isinstance(generated_topic, str):
-        generated_topic = strip_think_tags(generated_topic) or generated_topic
-    if generated_topic and generated_topic != session_topic:
-        logger.info(f"Using AI-generated topic: {generated_topic} (original: {session_topic})")
-        # 更新 session 中的 topic
-        session_topic = generated_topic
-        await crud.update_session(db, session_id, topic=generated_topic)
-        await db.commit()
+            if conversation_id:
+                try:
+                    await crud.update_conversation_title(
+                        db,
+                        conversation_id,
+                        normalize_conversation_title(generated_topic),
+                    )
+                    logger.info("Updated conversation title to: %s", generated_topic)
+                except Exception as e:
+                    logger.error("Failed to update conversation title: %s", e)
 
-        # 更新对话标题
+        # 更新补充信息工具调用状态
         if conversation_id:
             try:
-                await crud.update_conversation_title(db, conversation_id, normalize_conversation_title(generated_topic))
-                await db.commit()
-                logger.info(f"Updated conversation title to: {generated_topic}")
-            except Exception as e:
-                logger.error(f"Failed to update conversation title: {e}")
-
-    # 更新补充信息工具调用的状态为 confirmed
-    if conversation_id:
-        try:
-            # 获取该对话的所有消息
-            messages = await crud.get_messages_by_conversation(db, conversation_id)
-            # 找到最后一条 assistant 消息
-            for msg in reversed(messages):
-                if msg.role == "assistant":
-                    # 获取该消息的工具调用
+                messages = await crud.get_messages_by_conversation(db, conversation_id)
+                for msg in reversed(messages):
+                    if msg.role != "assistant":
+                        continue
                     tool_calls = await crud.get_tool_calls_by_message(db, msg.id)
-                    # 找到 supplement_info 类型的工具调用
                     for tc in tool_calls:
                         if tc.tool_type == "supplement_info" and tc.status == "pending":
-                            # 更新状态为 confirmed
                             await crud.update_tool_call_status(
                                 db, tc.id, "confirmed", result_json=request.supplement_data
                             )
-                            await db.commit()
-                            logger.info(f"Updated tool call {tc.id} status to confirmed")
+                            logger.info("Updated tool call %s status to confirmed", tc.id)
                             break
                     break
-        except Exception as e:
-            logger.error(f"Failed to update tool call status: {e}")
+            except Exception as e:
+                logger.error("Failed to update tool call status: %s", e)
 
-    # 返回流式响应继续生成
-    logger.info(f"Starting stream_ppt_generation for session {session_id}, conversation {conversation_id}")
-    logger.info(f"Topic: {session_topic}")
-    logger.info(f"Supplement data: {request.supplement_data}")
-    
+        await crud.pause_running_sessions(
+            db,
+            keep_session_id=session_id,
+            user_id=conversation_user_id,
+        )
+
+        await db.commit()
+
+    logger.info("Starting stream_ppt_generation for session %s, conversation %s", session_id, conversation_id)
+    logger.info("Topic: %s", session_topic)
+    logger.info("Supplement data: %s", request.supplement_data)
+
+    stream = stream_ppt_generation(
+        instruction=session_topic,
+        session_id=session_id,
+        conversation_id=conversation_id,
+        conversation_uuid=conversation_uuid,
+        supplement_data=request.supplement_data,
+        search_mode=request.search_mode,
+        db=None,
+        save_user_message=False,
+    )
+    guarded_stream = _stream_with_session_guard(
+        stream,
+        session_id=session_id,
+        conversation_id=conversation_id,
+        conversation_uuid=conversation_uuid,
+    )
+
     return StreamingResponse(
-        stream_ppt_generation(
-            instruction=session_topic,
-            session_id=session_id,
-            conversation_id=conversation_id,
-            supplement_data=request.supplement_data,
-            search_mode=request.search_mode,
-            db=db,
-            save_user_message=False,  # 用户消息已在初始请求中保存，不需要重复保存
-        ),
+        guarded_stream,
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
-        }
+            "X-Session-Id": session_id,
+            "X-Conversation-Id": str(conversation_id) if conversation_id else "",
+            "X-Conversation-UUID": conversation_uuid or "",
+        },
     )
+
+
+@app.post("/api/ppt/confirm")
+async def confirm_ppt_compat(request: ConfirmRequest):
+    """向后兼容：保留 /api/ppt/confirm 别名，内部复用统一确认逻辑。"""
+    return await confirm(request)
 
 
 @app.post("/api/sessions/{session_id}/pause")
