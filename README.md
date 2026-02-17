@@ -22,6 +22,16 @@
 
 ![SlideAgent Homepage](images/home.png)
 
+## 🚧 Project Status
+
+This project is still under active development and gradually improving:
+
+- ✅ Core features are basically implemented
+- 🔄 API interfaces may be adjusted
+- 📝 Documentation is being continuously updated
+
+Welcome to try it out and provide feedback!
+
 ## 🎉 News
 
 - **\[2026/02\]** Add The Function of Online Search
