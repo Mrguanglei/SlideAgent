@@ -84,9 +84,6 @@
    docker-compose up --build -d
    ```
 
-4. **访问应用**
-   - **前端:** [http://localhost:3000](http://localhost:3000)
-   - **后端 API:** [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ## 支持模型厂商 API(已测试)
 | 厂商/系列         | 模型              | 状态    | 备注 |
