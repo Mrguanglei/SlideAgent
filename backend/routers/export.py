@@ -129,7 +129,10 @@ async def export_ppt_file(
         download_filename = f"{safe_title}{format_extension}"
         
         # 检查缓存
-        cached_export = await crud.get_ppt_export(db, version.id, request.format)
+        # PPTX 导出链路近期迭代频繁，历史缓存可能与当前字体/版式修复不一致。
+        # 对 PPTX 强制实时导出，避免返回旧缓存导致“乱码/样式异常”。
+        use_cache = request.format != "pptx"
+        cached_export = await crud.get_ppt_export(db, version.id, request.format) if use_cache else None
         if cached_export and cached_export.file_data:
             # 从数据库读取文件数据
             logger.info(f"Using cached export from database: {cached_export.filename}")

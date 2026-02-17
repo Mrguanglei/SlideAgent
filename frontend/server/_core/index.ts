@@ -45,6 +45,16 @@ async function startServer() {
     process.env.PPT_DEMO_DIR || path.resolve(process.cwd(), "..", "PPT_demo");
 
   const proxySSE = async (req: express.Request, res: express.Response, backendPath: string) => {
+    const abortController = new AbortController();
+    const onClientDisconnect = () => {
+      if (!abortController.signal.aborted) {
+        abortController.abort();
+      }
+    };
+
+    req.once("aborted", onClientDisconnect);
+    res.once("close", onClientDisconnect);
+
     try {
       const response = await fetch(`${BACKEND_URL}${backendPath}`, {
         method: "POST",
@@ -52,15 +62,9 @@ async function startServer() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(req.body),
+        signal: abortController.signal,
       });
 
-      // 设置 SSE 响应头
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
-      res.setHeader("X-Accel-Buffering", "no");
-
-      // 转发 session_id / conversation_id（必须在 flushHeaders 前设置）
       const sessionId = response.headers.get("X-Session-Id");
       if (sessionId) {
         res.setHeader("X-Session-Id", sessionId);
@@ -69,6 +73,26 @@ async function startServer() {
       if (conversationId) {
         res.setHeader("X-Conversation-Id", conversationId);
       }
+      const conversationUuid = response.headers.get("X-Conversation-UUID");
+      if (conversationUuid) {
+        res.setHeader("X-Conversation-UUID", conversationUuid);
+      }
+
+      // 非流式错误必须透传状态码，避免把后端 4xx/5xx 伪装成 200 SSE
+      if (!response.ok) {
+        const contentType = response.headers.get("content-type") || "application/json";
+        const errorText = await response.text();
+        res.status(response.status);
+        res.setHeader("Content-Type", contentType);
+        res.send(errorText);
+        return;
+      }
+
+      // 设置 SSE 响应头
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
 
       res.flushHeaders?.();
 
@@ -78,6 +102,14 @@ async function startServer() {
         const decoder = new TextDecoder();
 
         while (true) {
+          if (abortController.signal.aborted || res.writableEnded) {
+            try {
+              await reader.cancel();
+            } catch (_err) {
+              // Ignore cancellation errors from already-closed streams.
+            }
+            break;
+          }
           const { done, value } = await reader.read();
           if (done) break;
           const chunk = decoder.decode(value, { stream: true });
@@ -86,12 +118,18 @@ async function startServer() {
       }
       res.end();
     } catch (error) {
+      if (abortController.signal.aborted) {
+        return;
+      }
       console.error("[Proxy] SSE error:", error);
       if (!res.headersSent) {
         res.status(500).json({ error: "Failed to connect to backend" });
       } else {
         res.end();
       }
+    } finally {
+      req.removeListener("aborted", onClientDisconnect);
+      res.removeListener("close", onClientDisconnect);
     }
   };
 

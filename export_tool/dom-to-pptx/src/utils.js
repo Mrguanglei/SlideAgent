@@ -65,7 +65,7 @@ export function extractTableData(node, scale, measureScaleX = 1) {
       const cellText = cell.innerText.replace(/[\n\r\t]+/g, ' ').trim();
 
       // A. Text Style
-      const textStyle = getTextStyle(style, scale);
+      const textStyle = getTextStyle(style, scale, cellText);
 
       // B. Cell Background
       const bg = parseColor(style.backgroundColor);
@@ -425,10 +425,51 @@ const _genericFontMap = {
   'system-ui': 'Arial',
   'ui-monospace': 'Courier New',
 };
+const _cjkTextRe = /[\u3400-\u9FFF\uF900-\uFAFF]/;
+const _latinFallbackFonts = new Set([
+  'arial',
+  'calibri',
+  'times new roman',
+  'helvetica',
+  'courier new',
+  'comic sans ms',
+  'impact',
+]);
+const _defaultCjkFont = 'Noto Sans SC';
+
+const _cjkFontHints = [
+  'cjk',
+  'noto sans sc',
+  'noto serif sc',
+  'source han',
+  'pingfang',
+  'hiragino',
+  'microsoft yahei',
+  'simhei',
+  'simsun',
+  'heiti',
+  'songti',
+  'kaiti',
+  'fangsong',
+  'wenquanyi',
+  'dengxian',
+  'yahei',
+];
+
+function isGenericFamily(face) {
+  return !!_genericFontMap[face.toLowerCase()];
+}
+
+function hasCjkHint(face) {
+  const lower = face.toLowerCase();
+  return _cjkFontHints.some((hint) => lower.includes(hint));
+}
 
 function resolveFontFace(fontFamily) {
   const parts = fontFamily.split(',').map(f => f.trim().replace(/['"]/g, ''));
   if (parts.length <= 1) return parts[0] || 'Arial';
+  const nonGenericFamilies = parts.filter((f) => !isGenericFamily(f));
+  const cjkPreferredFamily = nonGenericFamilies.find((f) => hasCjkHint(f));
 
   try {
     const canvas = document.createElement('canvas');
@@ -437,7 +478,12 @@ function resolveFontFace(fontFamily) {
 
     for (let i = 0; i < parts.length; i++) {
       const face = parts[i].toLowerCase();
-      if (_genericFontMap[face]) return _genericFontMap[face];
+      if (_genericFontMap[face]) {
+        // For CJK stacks like "Noto Sans SC, sans-serif", do not force Arial.
+        // Keeping the CJK family name lets PowerPoint do proper CJK fallback.
+        if (cjkPreferredFamily) return cjkPreferredFamily;
+        return _genericFontMap[face];
+      }
 
       // Build CSS font value: with this font vs without
       const withFont = parts.slice(i).map(f => `"${f}"`).join(', ');
@@ -456,10 +502,11 @@ function resolveFontFace(fontFamily) {
     }
   } catch (_) { /* fall through */ }
 
+  if (cjkPreferredFamily) return cjkPreferredFamily;
   return parts[0] || 'Arial';
 }
 
-export function getTextStyle(style, scale) {
+export function getTextStyle(style, scale, sampleText = '') {
   let colorObj = parseColor(style.color);
 
   const bgClip = style.webkitBackgroundClip || style.backgroundClip;
@@ -500,9 +547,16 @@ export function getTextStyle(style, scale) {
   if (mt > 0) paraSpaceBefore = mt * 0.75 * scale;
   if (mb > 0) paraSpaceAfter = mb * 0.75 * scale;
 
+  const rawFontFace = resolveFontFace(style.fontFamily);
+  const hasCjkText = typeof sampleText === 'string' && _cjkTextRe.test(sampleText);
+  let finalFontFace = rawFontFace;
+  if (hasCjkText && (!rawFontFace || _latinFallbackFonts.has(rawFontFace.toLowerCase()))) {
+    finalFontFace = _defaultCjkFont;
+  }
+
   return {
     color: colorObj.hex || '000000',
-    fontFace: resolveFontFace(style.fontFamily),
+    fontFace: finalFontFace,
     fontSize: Math.floor(fontSizePx * 0.75 * scale),
     bold: parseInt(style.fontWeight) >= 600,
     italic: style.fontStyle === 'italic',

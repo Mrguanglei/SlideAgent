@@ -1,10 +1,10 @@
 import tempfile
 from copy import deepcopy
 
-from src.presentation import Presentation
-from src.utils import Config
+from pptagent.presentation import Presentation
+from pptagent.utils import Config
 
-from test.conftest import test_config
+from .conftest import test_config
 
 
 def test_presentation():

@@ -7,17 +7,13 @@ LLM 处理服务 - 关键字提取和向量嵌入
 - 支持配置化的模型设置（从 .env 读取）
 """
 
-import os
 import json
 import asyncio
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 
 import httpx
-from dotenv import load_dotenv
-
-# 加载环境变量
-load_dotenv()
+from utils.env_config import env_config
 
 
 @dataclass
@@ -30,12 +26,13 @@ class LLMConfig:
     
     @classmethod
     def from_env(cls) -> "LLMConfig":
-        """从环境变量加载配置"""
+        """从统一配置加载（由 .env 驱动）"""
+        env_config.load()
         return cls(
-            base_url=os.getenv("KNOWLEDGE_LLM_BASE_URL", os.getenv("PPTAGENT_API_BASE", "https://open.bigmodel.cn/api/paas/v4/")),
-            api_key=os.getenv("KNOWLEDGE_LLM_API_KEY", os.getenv("PPTAGENT_API_KEY", "")),
-            model_name=os.getenv("KNOWLEDGE_LLM_MODEL", os.getenv("PPTAGENT_MODEL", "glm-4-flash")),
-            embedding_model=os.getenv("KNOWLEDGE_EMBEDDING_MODEL", "embedding-3"),
+            base_url=env_config.KNOWLEDGE_LLM_BASE_URL or env_config.PPTAGENT_API_BASE or "https://open.bigmodel.cn/api/paas/v4/",
+            api_key=env_config.KNOWLEDGE_LLM_API_KEY or env_config.PPTAGENT_API_KEY or "",
+            model_name=env_config.KNOWLEDGE_LLM_MODEL or env_config.PPTAGENT_MODEL,
+            embedding_model=env_config.KNOWLEDGE_EMBEDDING_MODEL or "embedding-3",
         )
 
 

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import random
 from itertools import product
 from pathlib import Path
 from typing import Any
@@ -324,6 +325,36 @@ class LLM(BaseModel):
         retry_times: int = RETRY_TIMES,
     ) -> ChatCompletion:
         """Unified interface for chat and tool calls with alternating retry"""
+        def _status_code(exc: Exception) -> int | None:
+            code = getattr(exc, "status_code", None)
+            if isinstance(code, int):
+                return code
+            response = getattr(exc, "response", None)
+            response_code = getattr(response, "status_code", None)
+            if isinstance(response_code, int):
+                return response_code
+            return None
+
+        def _retry_delay_seconds(retry_idx: int, exc: Exception) -> float:
+            status = _status_code(exc)
+            retry_after = 0.0
+            response = getattr(exc, "response", None)
+            headers = getattr(response, "headers", None)
+            if headers:
+                raw_retry_after = headers.get("retry-after")
+                if raw_retry_after:
+                    try:
+                        retry_after = float(raw_retry_after)
+                    except Exception:
+                        retry_after = 0.0
+
+            base = min(30.0, 1.5 * (2 ** retry_idx))
+            if status == 429:
+                base = max(base, 4.0)
+            elif isinstance(status, int) and status >= 500:
+                base = max(base, 2.0)
+            return min(60.0, max(base, retry_after) + random.uniform(0.0, 0.75))
+
         if isinstance(messages, str):
             messages = [{"role": "user", "content": messages}]
         else:
@@ -351,9 +382,13 @@ class LLM(BaseModel):
                     )
                 except (AssertionError, ValidationError) as e:
                     errors.append(f"[{model}] {e}")
+                    if retry_idx < retry_times - 1:
+                        await asyncio.sleep(0.2)
                 except Exception as e:
                     errors.append(f"[{model}] {e}")
                     logging_openai_exceptions(model, e)
+                    if retry_idx < retry_times - 1:
+                        await asyncio.sleep(_retry_delay_seconds(retry_idx, e))
         raise ValueError(f"All models failed after {retry_times} retries:\n{errors}")
 
     async def generate_image(
@@ -427,13 +462,12 @@ class DeepPresenterConfig(BaseModel):
         """Load configuration from environment variables"""
         import os
         
-        # 从环境变量构建配置
-        def get_llm_config(prefix: str, fallback_prefix: str = "PPTAGENT") -> dict:
-            """Get LLM configuration from environment variables with fallback"""
+        # 强制使用 PPTAGENT 主配置，避免历史分路变量残留导致模型漂移
+        def get_pptagent_llm_config() -> dict:
             return {
-                "base_url": os.getenv(f"{prefix}_BASE_URL") or os.getenv(f"{fallback_prefix}_API_BASE"),
-                "model": os.getenv(f"{prefix}_MODEL") or os.getenv(f"{fallback_prefix}_MODEL"),
-                "api_key": os.getenv(f"{prefix}_API_KEY") or os.getenv(f"{fallback_prefix}_API_KEY"),
+                "base_url": os.getenv("PPTAGENT_API_BASE"),
+                "model": os.getenv("PPTAGENT_MODEL"),
+                "api_key": os.getenv("PPTAGENT_API_KEY"),
             }
         
         # 只配置真正使用的 Agent
@@ -441,24 +475,24 @@ class DeepPresenterConfig(BaseModel):
             "file_path": "env://",  # 标记为从环境变量加载
             "mcp_config_file": str(PACKAGE_DIR / "mcp.json"),  # 占位符，实际不使用
             "design_agent": {
-                **get_llm_config("DESIGN_AGENT"),
+                **get_pptagent_llm_config(),
                 "is_multimodal": os.getenv("DESIGN_AGENT_MULTIMODAL", "true").lower() == "true",
             },
             # 以下是 DeepPresenter 要求的必需字段，但实际不使用，使用 design_agent 配置作为 fallback
-            "research_agent": get_llm_config("DESIGN_AGENT"),  # fallback 到 design_agent
+            "research_agent": get_pptagent_llm_config(),  # 与 design_agent 保持一致
             "long_context_model": {
-                **get_llm_config("DESIGN_AGENT"),
-                "fallback_base_url": os.getenv("DESIGN_AGENT_BASE_URL") or os.getenv("PPTAGENT_API_BASE"),
-                "fallback_model": os.getenv("DESIGN_AGENT_MODEL") or os.getenv("PPTAGENT_MODEL"),
-                "fallback_api_key": os.getenv("DESIGN_AGENT_API_KEY") or os.getenv("PPTAGENT_API_KEY"),
+                **get_pptagent_llm_config(),
+                "fallback_base_url": os.getenv("PPTAGENT_API_BASE"),
+                "fallback_model": os.getenv("PPTAGENT_MODEL"),
+                "fallback_api_key": os.getenv("PPTAGENT_API_KEY"),
             },
             "vision_model": {
-                **get_llm_config("DESIGN_AGENT"),
-                "fallback_base_url": os.getenv("DESIGN_AGENT_BASE_URL") or os.getenv("PPTAGENT_API_BASE"),
-                "fallback_model": os.getenv("DESIGN_AGENT_MODEL") or os.getenv("PPTAGENT_MODEL"),
-                "fallback_api_key": os.getenv("DESIGN_AGENT_API_KEY") or os.getenv("PPTAGENT_API_KEY"),
+                **get_pptagent_llm_config(),
+                "fallback_base_url": os.getenv("PPTAGENT_API_BASE"),
+                "fallback_model": os.getenv("PPTAGENT_MODEL"),
+                "fallback_api_key": os.getenv("PPTAGENT_API_KEY"),
             },
-            "t2i_model": get_llm_config("DESIGN_AGENT"),  # fallback 到 design_agent
+            "t2i_model": get_pptagent_llm_config(),  # 与 design_agent 保持一致
         }
         
         return cls(**config_data)

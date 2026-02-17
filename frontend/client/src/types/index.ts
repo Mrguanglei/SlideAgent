@@ -168,6 +168,8 @@ export interface Conversation {
   message_count?: number;
   has_ppt?: boolean;
   task_status?: "idle" | "running" | "paused" | "completed";  // 任务状态
+  active_session_id?: string | null;
+  active_stage?: string | null;
 }
 
 // 右侧面板类型

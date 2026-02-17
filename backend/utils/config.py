@@ -48,9 +48,9 @@ class Config(metaclass=ConfigMeta):
     """全局配置类（向后兼容包装器）"""
     
     @classmethod
-    def load(cls):
+    def load(cls, force: bool = False):
         """加载所有配置"""
-        env_config.load()
+        env_config.load(force=force)
 
 
 # 导出配置实例（向后兼容）

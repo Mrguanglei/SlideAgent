@@ -1,4 +1,5 @@
 import { motion } from "framer-motion";
+import type { Variants } from "framer-motion";
 import { ArrowRight, Download, FileText, Play } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
@@ -9,7 +10,7 @@ interface DemoItem {
   modifiedAt: string;
 }
 
-const container = {
+const container: Variants = {
   hidden: { opacity: 0, y: 16 },
   show: {
     opacity: 1,
@@ -18,7 +19,7 @@ const container = {
   },
 };
 
-const item = {
+const item: Variants = {
   hidden: { opacity: 0, y: 12 },
   show: { opacity: 1, y: 0, transition: { duration: 0.4, ease: "easeOut" } },
 };
