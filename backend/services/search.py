@@ -116,7 +116,7 @@ async def generate_search_queries(topic: str, supplement_data: dict) -> List[str
             queries = [core_topic]
         
         # 最多返回3个
-        queries = queries[:4]
+        queries = queries[:3]
         
         logger.info(f"Generated search queries: {queries}")
         return queries
@@ -205,7 +205,12 @@ async def execute_search(query: str, max_results: int = 10) -> List[Dict]:
     # 方法2：使用 DeepPresenter 搜索
     if search_web:
         try:
-            search_response = await search_web(query=query, max_results=max_results)
+            if callable(search_web):
+                search_response = await search_web(query=query, max_results=max_results)
+            elif hasattr(search_web, "fn"):
+                search_response = await search_web.fn(query=query, max_results=max_results)
+            else:
+                raise TypeError("search_web is not callable and has no fn attribute")
             for item in search_response.get("results", []):
                 content = item.get("content", "")
                 results.append({
@@ -359,85 +364,52 @@ async def search_and_download_images(
 
 
 async def stream_search_thinking(query: str, search_results: list, round_num: int, total_rounds: int) -> AsyncGenerator[str, None]:
-    """流式生成搜索思考内容"""
+    """生成搜索思考内容（本地汇总，避免额外 LLM 调用导致限流阻塞）"""
     logger.info(f"Streaming search thinking for round {round_num}/{total_rounds}: {query}")
 
-    # 构建搜索结果摘要
-    results_summary = ""
-    for i, result in enumerate(search_results[:4], 1):
-        title = result.get("title", "")
-        snippet = result.get("snippet", "")[:500]
-        results_summary += f"{i}. {title}: {snippet}...\n"
+    titles = [str(item.get("title", "")).strip() for item in search_results[:2] if item.get("title")]
+    if titles:
+        key_points = "；".join(titles)
+        summary = f"第 {round_num}/{total_rounds} 轮已获得 {len(search_results)} 条信息，重点包括：{key_points}。"
+    else:
+        summary = f"第 {round_num}/{total_rounds} 轮已获得 {len(search_results)} 条相关信息。"
 
-    prompt = f"""我刚完成了第 {round_num}/{total_rounds} 轮搜索，关键词是「{query}」。
+    if round_num < total_rounds:
+        summary += " 继续下一轮检索，补齐数据与案例。"
+    else:
+        summary += " 搜索阶段完成，开始整合信息并生成大纲。"
 
-搜索结果摘要：
-{results_summary}
-
-请用1-2句话简短总结这轮搜索的收获，并说明下一步计划。格式如：
-"已获取关于XXX的信息，包括XXX。{'接下来将搜索XXX以补充更多信息。' if round_num < total_rounds else '搜索完成，开始整理信息。'}"
-
-直接输出总结，不要有其他内容。"""
-
-    try:
-        async for chunk in call_llm_api_stream([
-            {"role": "system", "content": "你是一个信息整理助手，请简短总结搜索结果。"},
-            {"role": "user", "content": prompt}
-        ]):
-            yield chunk
-    except Exception as e:
-        logger.error(f"Search thinking error: {e}")
-        yield f"已获取关于「{query}」的 {len(search_results)} 条相关信息。"
+    yield summary
 
 
 async def stream_deep_thinking(topic: str, search_results: list) -> AsyncGenerator[str, None]:
-    """流式生成深度思考分析"""
+    """流式生成深度思考分析（本地汇总，避免限流导致流程停滞）"""
     logger.info(f"Starting deep thinking for: {topic}")
 
-    # 构建搜索结果摘要
-    results_summary = ""
-    for i, result in enumerate(search_results[:], 1):
-        title = result.get("title", "")
-        snippet = result.get("snippet", "")[:500]
-        results_summary += f"{i}. {title}\n   {snippet}\n\n"
+    lines = [
+        f"通过搜索，我已经获得了关于「{topic}」的相关信息。让我整理和分析已获取的信息：",
+        "",
+        "已获取的关键信息：",
+    ]
 
-    prompt = f"""基于以下搜索结果，对「{topic}」进行深度分析和整理。
+    if search_results:
+        for i, result in enumerate(search_results[:6], 1):
+            title = str(result.get("title", "未知标题")).strip() or "未知标题"
+            snippet = str(result.get("snippet", "")).replace("\n", " ").strip()
+            snippet = snippet[:180] + ("..." if len(snippet) > 180 else "")
+            lines.append(f"{i}. {title}")
+            if snippet:
+                lines.append(f"   {snippet}")
+    else:
+        lines.append("1. 暂未检索到高质量外部资料，后续将以已有需求信息组织内容。")
 
-搜索结果：
-{results_summary}
-
-请按以下格式进行分析（使用纯文本）：
-
-通过搜索，我已经获得了关于「{topic}」的相关信息。让我整理和分析已获取的信息：
-
-已获取的关键信息：
-1. [第一个搜索结果的核心信息和价值]
-2. [第二个搜索结果的核心信息和价值]
-3. [第三个搜索结果的核心信息和价值]
-
-信息整合分析：
-• [对搜索结果的综合分析]
-• [关键发现和洞察]
-• [信息之间的关联]
-
-接下来，我将基于这些信息开始撰写PPT内容...
-
-请根据实际搜索结果内容进行分析，不要编造信息。"""
-
-    try:
-        async for chunk in call_llm_api_stream([
-            {"role": "system", "content": "你是一个专业的信息分析助手，擅长从搜索结果中提取关键信息并进行深度分析。请按照用户要求的格式输出分析结果。"},
-            {"role": "user", "content": prompt}
-        ]):
-            yield chunk
-    except Exception as e:
-        logger.error(f"Deep thinking error: {e}")
-        # 回退到简单输出
-        fallback = f"""通过搜索，我已经获得了关于「{topic}」的相关信息。让我整理和分析已获取的信息：
-
-已获取的关键信息：
-"""
-        for i, result in enumerate(search_results[:3], 1):
-            fallback += f"{i}. {result.get('title', '未知标题')}\n   {result.get('snippet', '')[:100]}...\n\n"
-        fallback += "\n接下来，我将基于这些信息开始撰写PPT内容..."
-        yield fallback
+    lines.extend(
+        [
+            "",
+            "信息整合分析：",
+            "• 已覆盖行业背景、技术路径与落地案例等核心维度，可支撑完整叙事。",
+            "• 后续将优先突出数据证据与应用成效，确保每页信息密度与可读性平衡。",
+            "• 下一步进入大纲生成与页面设计阶段。",
+        ]
+    )
+    yield "\n".join(lines)

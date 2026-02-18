@@ -1,0 +1,1 @@
+{"image_dir": "/app/pptagent/test/fixtures/document", "language": {"lid": "zh"}, "metadata": {"title": "测试文档"}, "sections": [{"title": "背景", "summary": "背景概述", "markdown_content": "## 背景\n这是用于测试的段落。", "content": [{"title": "问题定义", "content": "这是一个测试子章节内容。"}]}]}

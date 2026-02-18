@@ -1,9 +1,9 @@
 from os.path import join
 
-from src.multimodal import ImageLabler
-from src.presentation import Presentation
+from pptagent.multimodal import ImageLabler
+from pptagent.presentation import Presentation
 
-from test.conftest import test_config
+from .conftest import test_config
 
 
 def test_load_captions():

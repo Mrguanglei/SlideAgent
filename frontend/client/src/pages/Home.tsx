@@ -201,6 +201,15 @@ const getSearchModeLabel = (value: "auto" | "on" | "off") => {
   return found?.label || "自动";
 };
 
+type StreamSource = "chat" | "confirm";
+type StreamContext = {
+  id: number;
+  source: StreamSource;
+  conversationId: number | null;
+  conversationUuid: string | null;
+  sessionId: string | null;
+};
+
 export default function Home() {
   // ==================== 路由 ====================
   const params = useParams<{ conversationId?: string }>();
@@ -407,14 +416,25 @@ export default function Home() {
   const isStreamingRef = useRef(false); // 跟踪是否正在进行本地流式传输
   const currentSessionIdRef = useRef<string | null>(null);
   const currentConversationIdRef = useRef<number | null>(null);
+  const currentConversationUuidRef = useRef<string | null>(null);
   const thinkingModeForStreamRef = useRef(false);
   const currentThinkingToolIdRef = useRef<string | null>(null);
   const rightPanelOpenTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const streamSerialRef = useRef(0);
+  const activeStreamContextRef = useRef<StreamContext | null>(null);
+  const conversationLoadSerialRef = useRef(0);
+  const conversationLoadAbortRef = useRef<AbortController | null>(null);
+  const conversationsLoadSerialRef = useRef(0);
+  const newChatSerialRef = useRef(0);
+  const streamedSlidesRef = useRef<Map<number, string>>(new Map());
 
   useEffect(() => {
     return () => {
       if (rightPanelOpenTimerRef.current) {
         clearTimeout(rightPanelOpenTimerRef.current);
+      }
+      if (conversationLoadAbortRef.current) {
+        conversationLoadAbortRef.current.abort();
       }
     };
   }, []);
@@ -428,10 +448,84 @@ export default function Home() {
     currentConversationIdRef.current = currentConversationId;
   }, [currentConversationId]);
 
+  useEffect(() => {
+    currentConversationUuidRef.current = currentConversationUuid;
+  }, [currentConversationUuid]);
+
+  const detachActiveStream = useCallback((reason: string) => {
+    const current = activeStreamContextRef.current;
+    if (current) {
+      console.log(
+        `[stream] Detach stream #${current.id} (${current.source}) conversation=${current.conversationId} reason=${reason}`
+      );
+    }
+    activeStreamContextRef.current = null;
+    isStreamingRef.current = false;
+    currentThinkingToolIdRef.current = null;
+    setIsLoading(false);
+    setIsConfirming(false);
+  }, []);
+
+  const beginStreamContext = useCallback((source: StreamSource): StreamContext => {
+    const context: StreamContext = {
+      id: ++streamSerialRef.current,
+      source,
+      conversationId: currentConversationIdRef.current,
+      conversationUuid: currentConversationUuidRef.current,
+      sessionId: currentSessionIdRef.current,
+    };
+    activeStreamContextRef.current = context;
+    isStreamingRef.current = true;
+    return context;
+  }, []);
+
+  const pauseCurrentConversationIfStreaming = useCallback(async (reason: string) => {
+    const active = activeStreamContextRef.current;
+    const sessionId = active?.sessionId || currentSessionIdRef.current;
+    const conversationId = active?.conversationId || currentConversationIdRef.current;
+
+    if (!active) {
+      return;
+    }
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    // 优先本地断流，避免切换对话时旧流继续污染当前页面。
+    detachActiveStream(reason);
+
+    if (conversationId) {
+      setConversations(prev =>
+        prev.map(c =>
+          c.id === conversationId ? { ...c, task_status: "paused" as const } : c
+        )
+      );
+    }
+
+    if (!sessionId) {
+      console.warn("[stream] active stream without session id, local stream already detached");
+      return;
+    }
+
+    const pauseAbortController = new AbortController();
+    const pauseTimer = setTimeout(() => pauseAbortController.abort(), 1500);
+    try {
+      await fetch(`/api/sessions/${sessionId}/pause`, {
+        method: "POST",
+        signal: pauseAbortController.signal,
+      });
+    } catch (error) {
+      console.warn(`[stream] Failed to pause session ${sessionId} after local detach`, error);
+    } finally {
+      clearTimeout(pauseTimer);
+    }
+  }, [detachActiveStream]);
+
   // ==================== 初始化 ====================
 
   useEffect(() => {
-    // 延迟加载，避免影响主页显示
+    // 首屏加载基础列表数据
     const loadData = async () => {
       try {
         await loadConversations();
@@ -444,17 +538,18 @@ export default function Home() {
       } catch (error) {
         console.warn("Failed to load PPT projects, backend may not be running");
       }
-
-      // 检查路由参数，如果有 conversation UUID，加载该对话
-      if (params.conversationId) {
-        try {
-          await loadConversation(params.conversationId);
-        } catch (error) {
-          console.error("Failed to load conversation from URL:", error);
-        }
-      }
     };
-    loadData();
+    void loadData();
+  }, []);
+
+  useEffect(() => {
+    if (!params.conversationId) {
+      return;
+    }
+
+    void loadConversation(params.conversationId).catch((error) => {
+      console.error("Failed to load conversation from URL:", error);
+    });
   }, [params.conversationId]);
 
   // 轮询机制：当任务正在运行且没有本地流式传输时（即切换对话后），定期刷新状态
@@ -482,9 +577,13 @@ export default function Home() {
 
   // ==================== API 调用 ====================
 
-  const loadConversations = async () => {
+  const loadConversations = useCallback(async () => {
+    const loadSerial = ++conversationsLoadSerialRef.current;
     try {
       const data = await getConversations();
+      if (loadSerial !== conversationsLoadSerialRef.current) {
+        return;
+      }
       const sorted = [...data].sort((a, b) => {
         const aPinned = (a as any).pinned ? 1 : 0;
         const bPinned = (b as any).pinned ? 1 : 0;
@@ -499,9 +598,12 @@ export default function Home() {
       });
       setConversations(sorted);
     } catch (error) {
+      if (loadSerial !== conversationsLoadSerialRef.current) {
+        return;
+      }
       console.error("Failed to load conversations:", error);
     }
-  };
+  }, []);
 
   const loadPPTProjects = async () => {
     try {
@@ -521,6 +623,30 @@ export default function Home() {
       }
     });
 
+  const resetStreamedSlides = useCallback(() => {
+    streamedSlidesRef.current = new Map();
+  }, []);
+
+  const setPptHtmlFromSlides = useCallback((slides: any[]) => {
+    const sortedSlides = [...(slides || [])].sort(
+      (a: any, b: any) => a.page_number - b.page_number
+    );
+    const slideMap = new Map<number, string>();
+    for (const slide of sortedSlides) {
+      const page = Number(slide.page_number);
+      const html = typeof slide.html_content === "string" ? slide.html_content : "";
+      if (Number.isFinite(page) && page > 0 && html) {
+        slideMap.set(page, html);
+      }
+    }
+    streamedSlidesRef.current = slideMap;
+    const htmlCode = Array.from(slideMap.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([, html]) => html)
+      .join("\n");
+    setPptHtmlCode(htmlCode);
+  }, []);
+
   const refreshPPTProject = async (
     projectId: number,
     options?: { preserveHtml?: boolean }
@@ -536,19 +662,10 @@ export default function Home() {
         slides,
       } as PPTProject);
       if (slides.length > 0) {
-        const htmlCode = slides
-          .sort((a: any, b: any) => a.page_number - b.page_number)
-          .map((slide: any) => slide.html_content)
-          .join("\n");
-        setPptHtmlCode(prev => {
-          if (!options?.preserveHtml || !prev) {
-            return htmlCode;
-          }
-          const prevCount = prev
-            .split(/(?=<!DOCTYPE html>)/i)
-            .filter((html: string) => html.trim()).length;
-          return prevCount === slides.length ? prev : htmlCode;
-        });
+        setPptHtmlFromSlides(slides);
+      } else if (!options?.preserveHtml) {
+        resetStreamedSlides();
+        setPptHtmlCode("");
       }
     } catch (error) {
       console.error("Failed to refresh PPT project:", error);
@@ -556,16 +673,34 @@ export default function Home() {
   };
 
   const loadConversation = async (uuid: string) => {
+    const loadSerial = ++conversationLoadSerialRef.current;
+    if (conversationLoadAbortRef.current) {
+      conversationLoadAbortRef.current.abort();
+    }
+    const loadAbortController = new AbortController();
+    conversationLoadAbortRef.current = loadAbortController;
+
+    const previousUuid = currentConversationUuidRef.current;
+    const hasActiveStream = Boolean(activeStreamContextRef.current);
+    if (hasActiveStream && previousUuid !== uuid) {
+      await pauseCurrentConversationIfStreaming(
+        `switch conversation ${previousUuid || "unknown"} -> ${uuid}`
+      );
+    }
     try {
-      const data = await getConversationDetail(uuid);
+      const data = await getConversationDetail(uuid, loadAbortController.signal);
+      if (loadAbortController.signal.aborted || loadSerial !== conversationLoadSerialRef.current) {
+        return;
+      }
       setCurrentConversationId(data.conversation.id);
       setCurrentConversationUuid(uuid);
 
-      // 设置 session_id
-      if (data.session_id) {
-        console.log(`[loadConversation] Setting session_id: ${data.session_id}`);
-        setCurrentSessionId(data.session_id);
+      // 始终同步 session_id，避免跨对话残留
+      const resolvedSessionId = data.active_session_id ?? data.session_id ?? null;
+      if (resolvedSessionId) {
+        console.log(`[loadConversation] Setting session_id: ${resolvedSessionId}`);
       }
+      setCurrentSessionId(resolvedSessionId);
       if (data.search_mode === "auto" || data.search_mode === "on" || data.search_mode === "off") {
         setSearchMode(data.search_mode);
       }
@@ -591,6 +726,7 @@ export default function Home() {
       setPptOutline("");
       setPptOutlineStreaming(false);
       setPptProject(null);
+      resetStreamedSlides();
       setPptHtmlCode("");
       setShowRightPanel(false);
       setRightPanelType(null);
@@ -601,16 +737,13 @@ export default function Home() {
         setPptProject(project);
 
         if (project.slides && project.slides.length > 0) {
-          const htmlCode = project.slides
-            .sort((a: any, b: any) => a.page_number - b.page_number)
-            .map((slide: any) => slide.html_content)
-            .join("\n");
-          setPptHtmlCode(htmlCode);
+          setPptHtmlFromSlides(project.slides);
           console.log("[PPT恢复] 成功恢复", project.slides.length, "张幻灯片");
           setRightPanelType("ppt_preview");
           setShowRightPanel(true);
         } else {
           console.warn("[PPT恢复] 未找到幻灯片数据", project);
+          resetStreamedSlides();
           setPptHtmlCode("");
           setShowRightPanel(false);
           setRightPanelType(null);
@@ -619,6 +752,7 @@ export default function Home() {
         setCurrentTopic(project.title);
       } else {
         setPptProject(null);
+        resetStreamedSlides();
         setPptHtmlCode("");
         setCurrentTopic(data.conversation.title);
         setShowRightPanel(false);
@@ -626,9 +760,20 @@ export default function Home() {
       }
 
       await waitForNextPaint();
+      if (loadAbortController.signal.aborted || loadSerial !== conversationLoadSerialRef.current) {
+        return;
+      }
 
-      // 恢复消息（避免在流式生成期间覆盖本地消息）
-      if (data.messages && !isStreamingRef.current) {
+      // 恢复消息：仅当同一对话仍在流式时跳过，允许跨对话切换时立即恢复。
+      const activeStream = activeStreamContextRef.current;
+      const isSameConversationStreaming = Boolean(
+        activeStream &&
+        (
+          (activeStream.conversationUuid && activeStream.conversationUuid === uuid) ||
+          (activeStream.conversationId && activeStream.conversationId === data.conversation.id)
+        )
+      );
+      if (data.messages && !isSameConversationStreaming) {
         const restoredMessages: Message[] = data.messages.map((msg: any) => ({
           id: msg.id.toString(),
           role: msg.role,
@@ -735,21 +880,32 @@ export default function Home() {
       }
       setMode("chat");
     } catch (error) {
-      console.error("Failed to load conversation:", error);
+      const isAbortError = error instanceof DOMException && error.name === "AbortError";
+      if (!isAbortError) {
+        console.error("Failed to load conversation:", error);
+      }
+    } finally {
+      if (conversationLoadAbortRef.current === loadAbortController) {
+        conversationLoadAbortRef.current = null;
+      }
     }
   };
 
   // ==================== 事件处理 ====================
 
-  const handleNewChat = () => {
+  const handleNewChat = async () => {
+    const newChatSerial = ++newChatSerialRef.current;
+    void pauseCurrentConversationIfStreaming("new chat");
     // 取消正在进行的请求
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
+    detachActiveStream("new chat");
 
     // 重置所有状态
     setCurrentConversationId(null);
     setCurrentConversationUuid(null);
+    setCurrentSessionId(null);
     setMessages([]);
     setInputValue("");
     setIsLoading(false);
@@ -764,6 +920,7 @@ export default function Home() {
     setCurrentImageSearchRound(1);
     setPptOutline("");
     setPptOutlineStreaming(false);
+    resetStreamedSlides();
     setPptHtmlCode("");
     setPptProject(null);
     setShowRightPanel(false);
@@ -776,14 +933,29 @@ export default function Home() {
     }
 
     setGreeting(pickGreeting());
-    setMode("home");
-    // 导航到新对话页面
-    setLocation('/chat');
+    try {
+      const conversation = await createConversation("新对话");
+      if (newChatSerial !== newChatSerialRef.current) {
+        return;
+      }
+      setCurrentConversationId(conversation.id);
+      setCurrentConversationUuid(conversation.uuid);
+      setMode("chat");
+      setLocation(`/chat/${conversation.uuid}`);
+    } catch (error) {
+      console.error("Failed to create conversation on new chat:", error);
+      if (newChatSerial !== newChatSerialRef.current) {
+        return;
+      }
+      setMode("home");
+      setLocation("/chat");
+    } finally {
+      void loadConversations();
+    }
   };
 
   const handleSelectConversation = (conversation: Conversation) => {
-    loadConversation(conversation.uuid);
-    // 导航到对话页面
+    // 只更新路由，具体数据加载统一由路由监听触发，避免双重请求导致的状态乱序。
     setLocation(`/chat/${conversation.uuid}`);
   };
 
@@ -858,6 +1030,8 @@ export default function Home() {
     setInputValue("");
     const currentAttachments = activeAttachments;
     setActiveAttachments([]);
+    resetStreamedSlides();
+    setPptHtmlCode("");
     setIsLoading(true);
 
     // 更新当前对话的任务状态为 running
@@ -865,7 +1039,11 @@ export default function Home() {
       setConversations(prev =>
         [...prev]
           .map(c =>
-            c.id === currentConversationId ? { ...c, task_status: "running" as const } : c
+            c.id === currentConversationId
+              ? { ...c, task_status: "running" as const }
+              : c.task_status === "running"
+                ? { ...c, task_status: "paused" as const }
+                : c
           )
           .sort((a, b) => {
             const aPinned = (a as any).pinned ? 1 : 0;
@@ -890,42 +1068,45 @@ export default function Home() {
 
     // 创建 AbortController
     abortControllerRef.current = new AbortController();
-
-    let response;
-
-    // PPT 生成请求
-    if (isPptMode) {
-      setIsLoading(true);
-      setIsEditMode(false); // 开始生成时强制退出编辑模式
-      isStreamingRef.current = true; // 标记开始流式传输
-
-      response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          instruction: userMessage.content,
-          conversation_id: currentConversationId,
-          attachments: currentAttachments.length > 0 ? currentAttachments : undefined,
-          deep_thinking_mode: deepThinkingMode,
-          search_mode: searchMode,
-        }),
-        signal: abortControllerRef.current.signal,
-      });
-    } else {
-      response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          instruction: userMessage.content,
-          conversation_id: currentConversationId,
-          deep_thinking_mode: deepThinkingMode,
-          search_mode: searchMode,
-        }),
-        signal: abortControllerRef.current.signal,
-      });
-    }
+    const streamContext = beginStreamContext("chat");
 
     try {
+      let response: Response;
+      // PPT 生成请求
+      if (isPptMode) {
+        setIsLoading(true);
+        setIsEditMode(false); // 开始生成时强制退出编辑模式
+
+        response = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            instruction: userMessage.content,
+            session_id: currentSessionIdRef.current,
+            conversation_id: currentConversationId,
+            conversation_uuid: currentConversationUuidRef.current,
+            attachments: currentAttachments.length > 0 ? currentAttachments : undefined,
+            deep_thinking_mode: deepThinkingMode,
+            search_mode: searchMode,
+          }),
+          signal: abortControllerRef.current.signal,
+        });
+      } else {
+        response = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            instruction: userMessage.content,
+            session_id: currentSessionIdRef.current,
+            conversation_id: currentConversationId,
+            conversation_uuid: currentConversationUuidRef.current,
+            deep_thinking_mode: deepThinkingMode,
+            search_mode: searchMode,
+          }),
+          signal: abortControllerRef.current.signal,
+        });
+      }
+
       if (!response.ok) {
         throw new Error("Chat request failed");
       }
@@ -934,6 +1115,12 @@ export default function Home() {
       const sessionId = response.headers.get("X-Session-Id");
       if (sessionId) {
         setCurrentSessionId(sessionId);
+        streamContext.sessionId = sessionId;
+      }
+      const conversationUuidHeader = response.headers.get("X-Conversation-UUID");
+      if (conversationUuidHeader) {
+        setCurrentConversationUuid(conversationUuidHeader);
+        streamContext.conversationUuid = conversationUuidHeader;
       }
 
       const reader = response.body?.getReader();
@@ -941,28 +1128,37 @@ export default function Home() {
 
       const decoder = new TextDecoder();
       let buffer = "";
+      const flushSSEBuffer = (raw: string) => {
+        const lines = raw.split("\n");
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data: ")) continue;
+          try {
+            const data = JSON.parse(trimmed.slice(6));
+            handleStreamEvent(data, streamContext);
+          } catch (e) {
+            console.error("Failed to parse SSE data:", e);
+          }
+        }
+      };
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          if (buffer.trim()) {
+            flushSSEBuffer(buffer);
+          }
+          break;
+        }
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
 
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              handleStreamEvent(data);
-            } catch (e) {
-              console.error("Failed to parse SSE data:", e);
-            }
-          }
-        }
+        flushSSEBuffer(lines.join("\n"));
       }
     } catch (error: any) {
-      if (error.name !== "AbortError") {
+      if (error.name !== "AbortError" && activeStreamContextRef.current?.id === streamContext.id) {
         console.error("Chat error:", error);
         setMessages(prev => [
           ...prev,
@@ -975,10 +1171,14 @@ export default function Home() {
         ]);
       }
     } finally {
-      setIsLoading(false);
+      const isCurrentStream = activeStreamContextRef.current?.id === streamContext.id;
+      if (isCurrentStream) {
+        setIsLoading(false);
+        isStreamingRef.current = false; // 标记流式传输结束
+        activeStreamContextRef.current = null;
+      }
       // 刷新对话列表以同步最新的 task_status
       loadConversations();
-      isStreamingRef.current = false; // 标记流式传输结束
     }
   };
 
@@ -1028,7 +1228,75 @@ export default function Home() {
     }, delay);
   }, []);
 
-  const handleStreamEvent = (data: any) => {
+  const handleStreamEvent = (data: any, streamContext?: StreamContext) => {
+    if (streamContext) {
+      const activeId = activeStreamContextRef.current?.id;
+      if (activeId !== streamContext.id) {
+        return;
+      }
+    }
+
+    const effectiveContext = streamContext || activeStreamContextRef.current;
+    const payloadSessionId =
+      typeof data.session_id === "string" && data.session_id.trim().length > 0
+        ? data.session_id
+        : null;
+    const payloadConversationId =
+      typeof data.conversation_id === "number"
+        ? data.conversation_id
+        : Number.isFinite(Number(data.conversation_id))
+          ? Number(data.conversation_id)
+          : null;
+    const payloadConversationUuid =
+      typeof data.conversation_uuid === "string" && data.conversation_uuid.trim().length > 0
+        ? data.conversation_uuid
+        : null;
+
+    if (effectiveContext?.sessionId && payloadSessionId && payloadSessionId !== effectiveContext.sessionId) {
+      return;
+    }
+    if (
+      effectiveContext?.conversationId &&
+      payloadConversationId &&
+      payloadConversationId !== effectiveContext.conversationId
+    ) {
+      return;
+    }
+    if (
+      effectiveContext?.conversationUuid &&
+      payloadConversationUuid &&
+      payloadConversationUuid !== effectiveContext.conversationUuid
+    ) {
+      return;
+    }
+
+    if (
+      effectiveContext &&
+      !effectiveContext.conversationId &&
+      data.type === "conversation_created" &&
+      typeof data.conversation_id === "number"
+    ) {
+      effectiveContext.conversationId = data.conversation_id;
+      if (payloadConversationUuid) {
+        effectiveContext.conversationUuid = payloadConversationUuid;
+      }
+      if (payloadSessionId) {
+        effectiveContext.sessionId = payloadSessionId;
+      }
+    }
+
+    const currentConversation = currentConversationIdRef.current;
+    if (
+      effectiveContext?.conversationId &&
+      currentConversation &&
+      effectiveContext.conversationId !== currentConversation
+    ) {
+      if (data.type === "done" || data.type === "ppt_complete" || data.type === "conversation_created") {
+        loadConversations();
+      }
+      return;
+    }
+
     // 收到任何事件时，取消确认加载状态
     if (isConfirming) {
       setIsConfirming(false);
@@ -1039,6 +1307,16 @@ export default function Home() {
       case "conversation_created":
         setCurrentConversationId(data.conversation_id);
         setCurrentConversationUuid(data.conversation_uuid);
+        if (typeof data.session_id === "string" && data.session_id) {
+          setCurrentSessionId(data.session_id);
+          if (streamContext) {
+            streamContext.sessionId = data.session_id;
+          }
+        }
+        if (streamContext) {
+          streamContext.conversationId = data.conversation_id ?? streamContext.conversationId;
+          streamContext.conversationUuid = data.conversation_uuid ?? streamContext.conversationUuid;
+        }
         // 导航到对话页面
         if (data.conversation_uuid) {
           setLocation(`/chat/${data.conversation_uuid}`);
@@ -1245,7 +1523,23 @@ export default function Home() {
         break;
 
       case "ppt_slide":
-        setPptHtmlCode(prev => prev + data.html);
+        {
+          const pageNumber = Number(data.slide_count);
+          const html = typeof data.html === "string" ? data.html : "";
+          if (Number.isFinite(pageNumber) && pageNumber > 0 && html) {
+            const prevHtml = streamedSlidesRef.current.get(pageNumber);
+            if (prevHtml !== html) {
+              streamedSlidesRef.current.set(pageNumber, html);
+              const mergedHtml = Array.from(streamedSlidesRef.current.entries())
+                .sort((a, b) => a[0] - b[0])
+                .map(([, value]) => value)
+                .join("\n");
+              setPptHtmlCode(mergedHtml);
+            }
+          } else if (html) {
+            setPptHtmlCode(prev => prev + html);
+          }
+        }
         openRightPanelDeferred("ppt_preview");
         break;
 
@@ -1257,12 +1551,20 @@ export default function Home() {
           }
           loadPPTProjects();
         }
+        setIsLoading(false);
+        isStreamingRef.current = false;
+        if (!streamContext || activeStreamContextRef.current?.id === streamContext.id) {
+          activeStreamContextRef.current = null;
+        }
         break;
 
       case "done":
         console.log("[handleStreamEvent] Task completed, resetting states");
         setIsLoading(false);
         isStreamingRef.current = false; // 任务完成时重置流式传输状态
+        if (!streamContext || activeStreamContextRef.current?.id === streamContext.id) {
+          activeStreamContextRef.current = null;
+        }
         loadConversations();
         // 刷新 PPT 项目详情（包含 slides），避免整页对话刷新
         if (pptProject?.id) {
@@ -1506,11 +1808,26 @@ export default function Home() {
     setIsConfirming(true);
     setIsLoading(true); // 设置全局加载状态，确保显示暂停按钮
     setIsEditMode(false); // 开始生成时强制退出编辑模式
-    isStreamingRef.current = true; // 标记开始流式传输
+    if (currentConversationIdRef.current) {
+      const activeId = currentConversationIdRef.current;
+      setConversations(prev =>
+        prev.map(c =>
+          c.id === activeId
+            ? { ...c, task_status: "running" as const }
+            : c.task_status === "running"
+              ? { ...c, task_status: "paused" as const }
+              : c
+        )
+      );
+    }
+    resetStreamedSlides();
+    setPptHtmlCode("");
+    const streamContext = beginStreamContext("confirm");
 
     console.log(`[handleConfirmInfo] Sending confirm request with:`);
     console.log(`  session_id: ${currentSessionIdRef.current}`);
     console.log(`  conversation_id: ${currentConversationIdRef.current}`);
+    console.log(`  conversation_uuid: ${currentConversationUuidRef.current}`);
     console.log(`  supplement_data:`, selectedData);
 
     try {
@@ -1520,6 +1837,7 @@ export default function Home() {
         body: JSON.stringify({
           session_id: currentSessionIdRef.current,
           conversation_id: currentConversationIdRef.current,
+          conversation_uuid: currentConversationUuidRef.current,
           supplement_data: selectedData,
           search_mode: searchMode,
         }),
@@ -1529,15 +1847,50 @@ export default function Home() {
         throw new Error("Confirm request failed");
       }
 
+      const resolvedSessionId = response.headers.get("X-Session-Id");
+      if (resolvedSessionId) {
+        setCurrentSessionId(resolvedSessionId);
+        streamContext.sessionId = resolvedSessionId;
+      }
+      const resolvedConversationId = response.headers.get("X-Conversation-Id");
+      if (resolvedConversationId) {
+        const parsed = Number(resolvedConversationId);
+        if (!Number.isNaN(parsed)) {
+          setCurrentConversationId(parsed);
+          streamContext.conversationId = parsed;
+        }
+      }
+      const resolvedConversationUuid = response.headers.get("X-Conversation-UUID");
+      if (resolvedConversationUuid) {
+        setCurrentConversationUuid(resolvedConversationUuid);
+        streamContext.conversationUuid = resolvedConversationUuid;
+      }
+
       // 处理流式响应
       const reader = response.body?.getReader();
       if (reader) {
         const decoder = new TextDecoder();
         let buffer = "";
+        const flushSSEBuffer = (raw: string) => {
+          const lines = raw.split("\n");
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith("data: ")) continue;
+            try {
+              const data = JSON.parse(trimmed.slice(6));
+              handleStreamEvent(data, streamContext);
+            } catch (e) {
+              console.error("Failed to parse SSE data:", e);
+            }
+          }
+        };
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) {
+            if (buffer.trim()) {
+              flushSSEBuffer(buffer);
+            }
             console.log("[handleConfirmInfo] Stream completed");
             break;
           }
@@ -1546,26 +1899,30 @@ export default function Home() {
           const lines = buffer.split("\n");
           buffer = lines.pop() || "";
 
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                handleStreamEvent(data);
-              } catch (e) {
-                console.error("Failed to parse SSE data:", e);
-              }
-            }
-          }
+          flushSSEBuffer(lines.join("\n"));
         }
       } else {
         console.warn("[handleConfirmInfo] No response body reader available");
       }
     } catch (error) {
       console.error("Confirm error:", error);
-      setIsLoading(false); // 发生错误时重置状态
-      isStreamingRef.current = false; // 错误时也要重置
+      if (activeStreamContextRef.current?.id === streamContext.id) {
+        setIsLoading(false); // 发生错误时重置状态
+        isStreamingRef.current = false; // 错误时也要重置
+        activeStreamContextRef.current = null;
+      }
     } finally {
-      setIsConfirming(false); // 无论成功失败，结束确认状态
+      const isCurrentStream = activeStreamContextRef.current?.id === streamContext.id;
+      if (isCurrentStream) {
+        setIsLoading(false);
+        isStreamingRef.current = false;
+        activeStreamContextRef.current = null;
+      }
+      if (activeStreamContextRef.current?.id === streamContext.id) {
+        setIsConfirming(false); // 无论成功失败，结束确认状态
+      } else {
+        setIsConfirming(false);
+      }
       console.log("[handleConfirmInfo] Confirm process finished");
     }
   };
@@ -1582,11 +1939,7 @@ export default function Home() {
     if (project.versions && project.versions.length > 0) {
       const latestVersion = project.versions[project.versions.length - 1];
       if (latestVersion.slides) {
-        const htmlCode = latestVersion.slides
-          .sort((a: any, b: any) => a.page_number - b.page_number)
-          .map((slide: any) => slide.html_content)
-          .join("\n");
-        setPptHtmlCode(htmlCode);
+        setPptHtmlFromSlides(latestVersion.slides);
       }
     }
 
@@ -1658,6 +2011,14 @@ export default function Home() {
           .sort((a: any, b: any) => a.page_number - b.page_number)
           .map((slide: any) => slide.html_content)
           .join("\n");
+        const updatedMap = new Map<number, string>();
+        for (const slide of updatedSlides) {
+          const page = Number(slide.page_number);
+          if (Number.isFinite(page) && page > 0 && typeof slide.html_content === "string") {
+            updatedMap.set(page, slide.html_content);
+          }
+        }
+        streamedSlidesRef.current = updatedMap;
         setPptHtmlCode(htmlCode);
 
         console.log('✅ Updated pptProject and pptHtmlCode (atomic update)');

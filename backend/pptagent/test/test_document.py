@@ -1,7 +1,7 @@
 import pytest
-from src.document import Document
+from pptagent.document import Document
 
-from test.conftest import test_config
+from .conftest import test_config
 
 
 @pytest.mark.asyncio

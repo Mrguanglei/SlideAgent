@@ -51,8 +51,7 @@ class AgentEnv:
 
         # 传递必要的环境变量给 MCP 服务器子进程
         mcp_env = {}
-        for key in ["PPTAGENT_API_BASE", "PPTAGENT_MODEL", "PPTAGENT_API_KEY",
-                    "DESIGN_AGENT_BASE_URL", "DESIGN_AGENT_MODEL", "DESIGN_AGENT_API_KEY"]:
+        for key in ["PPTAGENT_API_BASE", "PPTAGENT_MODEL", "PPTAGENT_API_KEY"]:
             if key in os.environ:
                 mcp_env[key] = os.environ[key]
 

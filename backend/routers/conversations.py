@@ -7,7 +7,7 @@ PPTAgent 对话路由模块
 import logging
 import re
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
@@ -17,6 +17,7 @@ from database.connection import get_db
 from database import crud
 
 logger = logging.getLogger(__name__)
+STALE_RUNNING_TIMEOUT = timedelta(minutes=20)
 
 
 def _strip_think_tags(text: Optional[str]) -> str:
@@ -27,6 +28,55 @@ def _strip_think_tags(text: Optional[str]) -> str:
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     cleaned = cleaned.lstrip("：:，,。. ")
     return cleaned
+
+
+def _normalize_task_status(session) -> str:
+    """Normalize session task status for UI consumption."""
+    if not session:
+        return "idle"
+
+    task_status = session.task_status or "idle"
+    stage = getattr(session, "stage", None)
+
+    # waiting_supplement means waiting for user input, not actively running.
+    if stage == "waiting_supplement" and task_status == "running":
+        return "idle"
+
+    # Defensive fallback for stale data.
+    if stage == "completed" and task_status == "running":
+        return "completed"
+
+    # Defensive fallback: avoid stale "running" dots after disconnected/failed streams.
+    if task_status == "running":
+        updated_at = getattr(session, "updated_at", None)
+        if isinstance(updated_at, datetime):
+            normalized_updated_at = (
+                updated_at if updated_at.tzinfo else updated_at.replace(tzinfo=timezone.utc)
+            )
+            if datetime.now(timezone.utc) - normalized_updated_at > STALE_RUNNING_TIMEOUT:
+                return "paused"
+
+    return task_status
+
+
+async def _resolve_conversation_session_state(
+    db: AsyncSession,
+    conversation_id: int,
+) -> tuple[str, Optional[str], Optional[str], bool]:
+    """返回对话状态视图: (task_status, active_session_id, active_stage, changed)."""
+    session = await crud.get_active_session_by_conversation(db, conversation_id)
+    if not session:
+        session = await crud.get_session_by_conversation(db, conversation_id)
+    if not session:
+        return "idle", None, None, False
+
+    normalized_status = _normalize_task_status(session)
+    changed = False
+    if normalized_status != (session.task_status or "idle"):
+        await crud.update_session(db, session.id, task_status=normalized_status)
+        changed = True
+
+    return normalized_status, session.id, session.stage, changed
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
@@ -102,6 +152,25 @@ async def list_conversations(
     db: AsyncSession = Depends(get_db)
 ):
     """获取对话列表（侧边栏用）- 包含任务状态"""
+    changed = False
+    kept_running_session_id, paused_running_count = await crud.ensure_single_running_session_for_user(db, user_id)
+    if paused_running_count > 0:
+        changed = True
+        logger.warning(
+            "Paused %d redundant running sessions for user %s, kept session %s",
+            paused_running_count,
+            user_id,
+            kept_running_session_id,
+        )
+
+    stale_count = await crud.pause_stale_running_sessions(
+        db,
+        stale_before=datetime.utcnow() - STALE_RUNNING_TIMEOUT,
+    )
+    if stale_count > 0:
+        changed = True
+        logger.info("Paused %d stale running sessions before listing conversations", stale_count)
+
     conversations = await crud.get_conversations(db, user_id=user_id, skip=skip, limit=limit)
     
     # 为每个对话查询关联的 session 获取 task_status
@@ -117,17 +186,23 @@ async def list_conversations(
             "task_status": "idle",  # 默认状态
         }
         
-        # 查询对话的 session 获取 task_status
-        session = await crud.get_session_by_conversation(db, conv.id)
-        if session:
-            conv_dict["task_status"] = session.task_status
+        task_status, active_session_id, active_stage, state_changed = await _resolve_conversation_session_state(
+            db, conv.id
+        )
+        conv_dict["task_status"] = task_status
+        conv_dict["active_session_id"] = active_session_id
+        conv_dict["active_stage"] = active_stage
+        changed = changed or state_changed
         
         # 检查是否有 PPT 项目
         ppt_project = await crud.get_ppt_project_by_conversation(db, conv.id)
         conv_dict["has_ppt"] = ppt_project is not None
         
         result.append(conv_dict)
-    
+
+    if changed:
+        await db.commit()
+
     return result
 
 
@@ -142,6 +217,9 @@ async def create_conversation(
         user_id=request.user_id,
         title=request.title
     )
+    # 显式提交，避免调用方在下一请求中立即读取时出现可见性竞态
+    await db.commit()
+    await db.refresh(conversation)
     return conversation
 
 
@@ -155,9 +233,20 @@ async def get_conversation(
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # 获取 Session 状态
-    session = await crud.get_session_by_conversation(db, conversation_id)
-    task_status = session.task_status if session else "idle"
+    stale_count = await crud.pause_stale_running_sessions(
+        db,
+        stale_before=datetime.utcnow() - STALE_RUNNING_TIMEOUT,
+        conversation_id=conversation_id,
+    )
+    session = await crud.get_active_session_by_conversation(db, conversation_id)
+    if not session:
+        session = await crud.get_session_by_conversation(db, conversation_id)
+    task_status = _normalize_task_status(session)
+    if session and task_status != (session.task_status or "idle"):
+        await crud.update_session(db, session.id, task_status=task_status)
+        stale_count += 1
+    if stale_count > 0:
+        await db.commit()
     search_mode = "auto"
     if session and isinstance(session.supplement_data, dict):
         raw_mode = session.supplement_data.get("search_mode")
@@ -268,6 +357,8 @@ async def get_conversation(
             "updated_at": conversation.updated_at.isoformat(),
             "task_status": task_status
         },
+        "active_session_id": session.id if session else None,
+        "active_stage": session.stage if session else None,
         "search_mode": search_mode,
         "messages": messages_with_tools,
         "ppt_project": ppt_project_dict
@@ -287,9 +378,20 @@ async def get_conversation_by_uuid(
     # 使用 conversation.id 获取其他数据
     conversation_id = conversation.id
 
-    # 获取 Session 状态
-    session = await crud.get_session_by_conversation(db, conversation_id)
-    task_status = session.task_status if session else "idle"
+    stale_count = await crud.pause_stale_running_sessions(
+        db,
+        stale_before=datetime.utcnow() - STALE_RUNNING_TIMEOUT,
+        conversation_id=conversation_id,
+    )
+    session = await crud.get_active_session_by_conversation(db, conversation_id)
+    if not session:
+        session = await crud.get_session_by_conversation(db, conversation_id)
+    task_status = _normalize_task_status(session)
+    if session and task_status != (session.task_status or "idle"):
+        await crud.update_session(db, session.id, task_status=task_status)
+        stale_count += 1
+    if stale_count > 0:
+        await db.commit()
     search_mode = "auto"
     if session and isinstance(session.supplement_data, dict):
         raw_mode = session.supplement_data.get("search_mode")
@@ -401,6 +503,8 @@ async def get_conversation_by_uuid(
         },
         "session_id": session.id if session else None,
         "task_status": task_status,
+        "active_session_id": session.id if session else None,
+        "active_stage": session.stage if session else None,
         "search_mode": search_mode,
         "messages": messages_with_tools,
         "ppt_project": ppt_project_dict

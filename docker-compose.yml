@@ -14,6 +14,7 @@ services:
       - OAUTH_SERVER_URL=${OAUTH_SERVER_URL:-}
       - VITE_APP_ID=${VITE_APP_ID:-}
       - JWT_SECRET=${JWT_SECRET:-default-secret-change-in-production}
+      - BUILT_IN_FORGE_MODEL=${PPTAGENT_MODEL}
       # Analytics configuration (optional - leave empty if not using analytics)
       - VITE_ANALYTICS_ENDPOINT=${VITE_ANALYTICS_ENDPOINT:-}
       - VITE_ANALYTICS_WEBSITE_ID=${VITE_ANALYTICS_WEBSITE_ID:-}
