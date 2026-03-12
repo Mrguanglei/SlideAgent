@@ -13,7 +13,10 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from pptagent.utils import ppt_to_images
+try:
+    from pptagent.utils import ppt_to_images
+except ImportError:
+    ppt_to_images = None
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +81,8 @@ async def get_demo_preview(name: str = Query(...)):
 
     images = sorted(output_dir.glob("slide_*.jpg"))
     if not images:
+        if ppt_to_images is None:
+            raise HTTPException(status_code=500, detail="pptagent module not available for preview generation")
         try:
             ppt_to_images(str(file_path), str(output_dir))
         except Exception as exc:

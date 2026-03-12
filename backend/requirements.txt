@@ -21,3 +21,4 @@ markdown==3.5.1
 python-dotenv==1.0.0
 openai==1.6.1
 python-pptx==0.6.23
+pypdf>=4.0.0

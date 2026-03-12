@@ -128,97 +128,70 @@ async def export_ppt_file(
         safe_title = sanitize_filename(raw_title, "presentation")
         download_filename = f"{safe_title}{format_extension}"
         
-        # 检查缓存
-        cached_export = await crud.get_ppt_export(db, version.id, request.format)
-        if cached_export and cached_export.file_data:
-            # 从数据库读取文件数据
-            logger.info(f"Using cached export from database: {cached_export.filename}")
-            file_data = cached_export.file_data
-            filename = cached_export.filename
-            
-            # 返回文件下载
-            media_type_map = {
-                "pdf": "application/pdf",
-                "html": "text/html",
-                "png": "application/zip",
-                "images": "application/zip",
-                "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            }
-            
-            return Response(
-                content=file_data,
-                media_type=media_type_map.get(request.format, "application/octet-stream"),
-                headers={
-                    "Content-Disposition": build_content_disposition(download_filename)
-                }
-            )
-        else:
-            # 调用 export_tool 服务进行导出
-            # 前端使用 "images" 表示图片导出，export_tool 端点为 "png"
-            export_format = "png" if request.format == "images" else request.format
-            logger.info(f"Calling export_tool service for {request.format} export")
+        # 每次都实时导出当前版本，不复用数据库缓存
+        # 前端使用 "images" 表示图片导出，export_tool 端点为 "png"
+        export_format = "png" if request.format == "images" else request.format
+        logger.info(
+            f"Calling export_tool service for {request.format} export "
+            f"(project_id={project.id}, version_id={version.id})"
+        )
 
-            try:
-                file_data, filename = await export_client.export(
-                    slides_html=slides_html,
-                    format=export_format,
-                    title=safe_title
-                )
-            except Exception as e:
-                logger.error(f"Export tool service failed: {e}")
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Export service error: {str(e)}"
-                )
-            
-            file_size = len(file_data)
-            
-            # 保存到数据库（包括文件数据）
-            try:
-                await crud.create_ppt_export(
-                    db, 
-                    project_id=project.id,
-                    version_id=version.id,
-                    format=request.format,
-                    file_path="",  # 不再需要本地路径
-                    filename=download_filename,
-                    file_size=file_size,
-                    file_data=file_data
-                )
-                logger.info(f"Saved export to database: {download_filename} ({file_size} bytes)")
-            except Exception as e:
-                logger.warning(f"Failed to save export to database: {e}")
-            
-            # 返回文件下载
-            media_type_map = {
-                "pdf": "application/pdf",
-                "html": "text/html",
-                "png": "application/zip",
-                "images": "application/zip",
-                "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            }
-            
-            return Response(
-                content=file_data,
-                media_type=media_type_map.get(request.format, "application/octet-stream"),
-                headers={
-                    "Content-Disposition": build_content_disposition(download_filename)
-                }
+        try:
+            file_data, _ = await export_client.export(
+                slides_html=slides_html,
+                format=export_format,
+                title=safe_title
             )
+        except Exception as e:
+            logger.error(f"Export tool service failed: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Export service error: {str(e)}"
+            )
+        
+        file_size = len(file_data)
+        
+        # 保存到数据库（追加历史记录，不覆盖旧记录）
+        try:
+            await crud.create_ppt_export(
+                db, 
+                project_id=project.id,
+                version_id=version.id,
+                format=request.format,
+                file_path="",  # 不再需要本地路径
+                filename=download_filename,
+                file_size=file_size,
+                file_data=file_data
+            )
+            logger.info(
+                f"Saved export to database: {download_filename} "
+                f"(version_id={version.id}, {file_size} bytes)"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to save export to database: {e}")
+        
+        # 返回文件下载
+        media_type_map = {
+            "pdf": "application/pdf",
+            "html": "text/html",
+            "png": "application/zip",
+            "images": "application/zip",
+            "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        }
+        
+        return Response(
+            content=file_data,
+            media_type=media_type_map.get(request.format, "application/octet-stream"),
+            headers={
+                "Content-Disposition": build_content_disposition(download_filename)
+            }
+        )
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Export failed: {e}")
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
-
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Export failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
-
 
 @router.get("/export/formats")
 async def get_export_formats():

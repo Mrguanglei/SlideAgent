@@ -7,6 +7,7 @@ PPTAgent LLM 服务模块
 import json
 import logging
 import asyncio
+import re
 from typing import AsyncGenerator, Optional
 
 import httpx
@@ -189,16 +190,33 @@ def clean_json_response(response: str) -> str:
 
 
 def extract_core_topic(topic: str) -> str:
-    """提取核心主题，去掉描述性词语"""
-    # 去掉常见的描述性前缀
-    prefixes_to_remove = ["帮我", "请", "介绍一下", "介绍", "详细的", "制作一个关于", "制作", "关于"]
-    core_topic = topic
-    for prefix in prefixes_to_remove:
-        core_topic = core_topic.replace(prefix, "").strip()
+    """提取核心主题，尽量剥离“帮我生成一份…PPT吧”这类指令包装。"""
+    if not topic:
+        return ""
 
-    # 去掉常见的描述性后缀
-    suffixes_to_remove = ["的PPT", "的演示文稿", "的幻灯片", "PPT", "演示文稿", "幻灯片"]
-    for suffix in suffixes_to_remove:
-        core_topic = core_topic.replace(suffix, "").strip()
+    text = str(topic).strip()
+    text = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE).strip()
+    text = re.sub(r"\s+", "", text)
+    if not text:
+        return ""
 
-    return core_topic if core_topic else topic
+    # 优先从常见句式中提取“主题主体”
+    patterns = [
+        r"(?:关于|围绕|以)([^，。！？!?；;：:]{2,48}?)(?:的)?(?:PPT|演示文稿|幻灯片)",
+        r"(?:做|制作|生成|写|整理|准备)(?:一份|一个|一套)?(?:关于|围绕|以)?([^，。！？!?；;：:]{2,48}?)(?:的)?(?:PPT|演示文稿|幻灯片)",
+        r"(?:介绍|讲解|讲讲|说明|分析)(?:一下)?([^，。！？!?；;：:]{2,48})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            candidate = match.group(1).strip("《》“”\"'：:，,。.！？!?；;~ ")
+            if candidate:
+                return candidate
+
+    # 回退规则：轻量清理首尾包装词
+    cleaned = re.sub(r"^(请你|请帮我|帮我|麻烦你|麻烦|我想|我要|给我)", "", text)
+    cleaned = re.sub(r"(做个|做一份|制作一份|生成一份|写一份|做一套|制作一套)", "", cleaned)
+    cleaned = re.sub(r"(?:关于|围绕|以)", "", cleaned, count=1)
+    cleaned = re.sub(r"(?:的)?(?:PPT|演示文稿|幻灯片)(?:吧|呀|啊|呢|吗)?$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = cleaned.strip("《》“”\"'：:，,。.！？!?；;~ ")
+    return cleaned or text

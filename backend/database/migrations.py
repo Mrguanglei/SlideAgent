@@ -355,8 +355,18 @@ async def run_migrations(engine: AsyncEngine):
             # 将 file_path 改为可选
             await drop_not_null_constraint(engine, "ppt_exports", "file_path")
 
+        # ==================== ppt_versions 表 ====================
+        if await check_table_exists(engine, "ppt_versions"):
+            # 添加 parent_version_id 列（手动编辑子版本的父版本 ID）
+            await check_and_add_column(
+                engine,
+                "ppt_versions",
+                "parent_version_id",
+                "BIGINT"
+            )
+
         logger.info("✓ Database migrations completed")
-        
+
     except Exception as e:
         logger.error(f"✗ Database migration failed: {e}")
         # 迁移失败不应该阻止应用启动，只记录错误

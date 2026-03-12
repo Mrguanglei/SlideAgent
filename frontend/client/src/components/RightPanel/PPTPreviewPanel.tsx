@@ -1,5 +1,4 @@
 import { useRef, useEffect, useState, RefObject } from "react";
-import { Loader2 } from "lucide-react";
 import type { PPTViewMode, PPTProject } from "@/types";
 import EditablePPTPreview, { type EditablePPTPreviewRef } from "./EditablePPTPreview";
 
@@ -15,6 +14,96 @@ interface PPTPreviewPanelProps {
   editablePPTRef?: RefObject<EditablePPTPreviewRef>;
 }
 
+const CODE_TOKEN_REGEX =
+  /(<!--.*?-->|\/\*.*?\*\/|<!DOCTYPE|<\/?[A-Za-z][\w:-]*|\/?>|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[A-Za-z_:][-A-Za-z0-9_:.]*(?=\s*=)|[A-Za-z-]+(?=\s*:)|\b\d+(?:\.\d+)?\b|[{}[\]();:,=])/g;
+
+type TokenType =
+  | "comment"
+  | "doctype"
+  | "tag"
+  | "tagEnd"
+  | "string"
+  | "attr"
+  | "cssProp"
+  | "number"
+  | "punct"
+  | "plain";
+
+const detectTokenType = (token: string): TokenType => {
+  if (token.startsWith("<!--") || token.startsWith("/*")) return "comment";
+  if (token === "<!DOCTYPE") return "doctype";
+  if (token.startsWith("</") || token.startsWith("<")) return "tag";
+  if (token === ">" || token === "/>") return "tagEnd";
+  if (token.startsWith("\"") || token.startsWith("'")) return "string";
+  if (/^[{}[\]();:,=]$/.test(token)) return "punct";
+  if (/^\d+(?:\.\d+)?$/.test(token)) return "number";
+  if (/^[A-Za-z-]+$/.test(token)) return "cssProp";
+  if (/^[A-Za-z_:][-A-Za-z0-9_:.]*$/.test(token)) return "attr";
+  return "plain";
+};
+
+const escapeHtml = (input: string): string =>
+  input
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
+
+const wrapToken = (token: string, type?: string): string => {
+  const escaped = escapeHtml(token);
+  if (type === "comment") {
+    return `<span style="color:#94a3b8">${escaped}</span>`;
+  }
+  if (type === "doctype") {
+    return `<span style="color:#7c3aed;font-weight:600">${escaped}</span>`;
+  }
+  if (type === "string") {
+    return `<span style="color:#16a34a">${escaped}</span>`;
+  }
+  if (type === "tag") {
+    return `<span style="color:#2563eb">${escaped}</span>`;
+  }
+  if (type === "tagEnd") {
+    return `<span style="color:#64748b">${escaped}</span>`;
+  }
+  if (type === "attr") {
+    return `<span style="color:#c2410c">${escaped}</span>`;
+  }
+  if (type === "cssProp") {
+    return `<span style="color:#0f766e">${escaped}</span>`;
+  }
+  if (type === "number") {
+    return `<span style="color:#e11d48">${escaped}</span>`;
+  }
+  if (type === "punct") {
+    return `<span style="color:#64748b">${escaped}</span>`;
+  }
+  return `<span style="color:#334155">${escaped}</span>`;
+};
+
+const highlightCodeLine = (line: string): string => {
+  if (!line) return "&nbsp;";
+  let result = "";
+  let lastIndex = 0;
+  const regex = new RegExp(CODE_TOKEN_REGEX.source, "g");
+  let match: RegExpExecArray | null = null;
+  while ((match = regex.exec(line)) !== null) {
+    const idx = match.index ?? 0;
+    const token = match[0] || "";
+    const tokenType = detectTokenType(token);
+    if (idx > lastIndex) {
+      result += escapeHtml(line.slice(lastIndex, idx));
+    }
+    result += wrapToken(token, tokenType);
+    lastIndex = idx + token.length;
+  }
+  if (lastIndex < line.length) {
+    result += escapeHtml(line.slice(lastIndex));
+  }
+  return result || "&nbsp;";
+};
+
 export default function PPTPreviewPanel({
   pptHtmlCode,
   pptViewMode,
@@ -28,10 +117,14 @@ export default function PPTPreviewPanel({
 }: PPTPreviewPanelProps) {
   const slideRefsPreview = useRef<(HTMLDivElement | null)[]>([]);
   const slideRefsCode = useRef<(HTMLDivElement | null)[]>([]);
-  const loadedSlidesRef = useRef<Set<number>>(new Set());
-  const [loadedSlidesCount, setLoadedSlidesCount] = useState(0);
   const [renderEpoch, setRenderEpoch] = useState(0);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [editorReady, setEditorReady] = useState(false);
+
+  const FONT_URL_PATTERN = /(https?:\/\/(?:fonts\.googleapis\.com|fonts\.gstatic\.com|cdn\.cn\.font\.mi\.com)[^"'\s)<]+)/gi;
+  const toFontCacheUrl = (url: string): string => `/api/font-cache?url=${encodeURIComponent(url)}`;
+  const rewriteFontUrlsToCache = (html: string): string =>
+    html.replace(FONT_URL_PATTERN, (match) => toFontCacheUrl(match));
 
   // 当 targetSlideIndex 改变时，滚动到对应的幻灯片
   useEffect(() => {
@@ -46,13 +139,11 @@ export default function PPTPreviewPanel({
 
   // 注入强制样式的函数
   const processSlideHtml = (slide: string): string => {
+    const cachedSlide = rewriteFontUrlsToCache(slide);
     const fontLinks = `
-      <!-- Material Icons -->
-      <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-      <!-- MiSans 字体 -->
-      <link href="https://cdn.cn.font.mi.com/font/css?family=MiSans:300,400,500,600,700:Chinese_Simplify,Latin&display=swap" rel="stylesheet">
-      <!-- Google Fonts 备用 -->
-      <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+      <link href="${toFontCacheUrl("https://fonts.googleapis.com/icon?family=Material+Icons")}" rel="stylesheet">
+      <link href="${toFontCacheUrl("https://cdn.cn.font.mi.com/font/css?family=MiSans:300,400,500,600,700:Chinese_Simplify,Latin&display=swap")}" rel="stylesheet">
+      <link href="${toFontCacheUrl("https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap")}" rel="stylesheet">
     `;
     const forceStyles = `
       ${fontLinks}
@@ -89,16 +180,19 @@ export default function PPTPreviewPanel({
         * {
           box-sizing: border-box !important;
         }
+        body {
+          font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+        }
       </style>
     `;
 
-    let processedSlide = slide;
-    if (slide.includes("</head>")) {
-      processedSlide = slide.replace("</head>", forceStyles + "</head>");
-    } else if (slide.includes("<body")) {
-      processedSlide = slide.replace("<body", forceStyles + "<body");
+    let processedSlide = cachedSlide;
+    if (cachedSlide.includes("</head>")) {
+      processedSlide = cachedSlide.replace("</head>", forceStyles + "</head>");
+    } else if (cachedSlide.includes("<body")) {
+      processedSlide = cachedSlide.replace("<body", forceStyles + "<body");
     } else {
-      processedSlide = forceStyles + slide;
+      processedSlide = forceStyles + cachedSlide;
     }
     return processedSlide;
   };
@@ -118,29 +212,41 @@ export default function PPTPreviewPanel({
     : [];
   // 优先使用流式拼接的 HTML，避免完成阶段切换导致空白闪烁
   const slidesHtml = slidesFromHtml.length > 0 ? slidesFromHtml : slidesFromProject;
+
+  // 编辑模式下，若 pptProject 没有 slides 数据，从 pptHtmlCode 构造合成 slides
+  // 这样切换编辑模式时不会出现白屏
+  const editableSlides = hasSlides
+    ? slides
+    : slidesFromHtml.length > 0
+    ? slidesFromHtml.map((html: string, idx: number) => ({
+        id: -(idx + 1), // 负数 id 表示未持久化的合成 slide
+        version_id: -1,
+        page_number: idx + 1,
+        html_content: html,
+        created_at: "",
+        updated_at: "",
+      }))
+    : [];
   const isEmptySlides = slidesHtml.length === 0;
-  const isLoadingSlides =
-    pptViewMode === "preview" &&
-    !isEditMode &&
-    !isEmptySlides &&
-    loadedSlidesCount < slidesHtml.length;
+  const hasEditableSlides = editableSlides.length > 0;
 
   const prevSlidesCountRef = useRef(0);
 
   useEffect(() => {
     const becameEmpty = slidesHtml.length === 0 && prevSlidesCountRef.current > 0;
     if (becameEmpty) {
-      loadedSlidesRef.current.clear();
-      setLoadedSlidesCount(0);
       setRenderEpoch(prev => prev + 1);
-    } else if (loadedSlidesCount !== loadedSlidesRef.current.size) {
-      setLoadedSlidesCount(loadedSlidesRef.current.size);
-    } else if (loadedSlidesCount > slidesHtml.length) {
-      setLoadedSlidesCount(slidesHtml.length);
     }
-
     prevSlidesCountRef.current = slidesHtml.length;
-  }, [slidesHtml.length, loadedSlidesCount]);
+  }, [slidesHtml.length]);
+
+  useEffect(() => {
+    if (!isEditMode) {
+      setEditorReady(false);
+      return;
+    }
+    setEditorReady(false);
+  }, [isEditMode, hasEditableSlides]);
 
   const copyToClipboard = async (text: string, index: number) => {
     const fallbackCopy = () => {
@@ -175,127 +281,102 @@ export default function PPTPreviewPanel({
     }
   };
 
-  // 调试日志
-  console.log('[PPTPreviewPanel] 状态:', {
-    isEditMode,
-    pptViewMode,
-    hasSlides,
-    slidesCount: slides?.length,
-    hasSaveCallback: !!onSaveSlide,
-    slideSource: pptProject?.current_version?.slides ? 'current_version.slides' : (pptProject as any)?.slides ? 'project.slides' : 'none'
-  });
+  const renderPreviewSlides = () => (
+    <div className="p-8 space-y-8">
+      {!isEmptySlides ? (
+        <>
+          {(() => {
+            slideRefsPreview.current = [];
+
+            return slidesHtml.map((slide: string, idx: number) => {
+              const containerWidth = 836;
+              const slideWidth = 1280;
+              const slideHeight = 720;
+              const scale = containerWidth / slideWidth;
+              const scaledHeight = slideHeight * scale;
+              const processedSlide = processSlideHtml(slide);
+
+              return (
+                <div
+                  key={idx}
+                  className="flex flex-col gap-3"
+                  ref={(el) => {
+                    slideRefsPreview.current[idx] = el;
+                  }}
+                >
+                  <div className="flex items-center gap-2 px-1">
+                    <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded">
+                      第 {idx + 1} 页
+                    </span>
+                    <div className="h-[1px] flex-1 bg-border/50"></div>
+                    <span className="text-[10px] text-muted-foreground/50 font-mono">
+                      1280 × 720
+                    </span>
+                  </div>
+
+                  <div
+                    className="relative shadow-xl rounded-xl bg-white border border-border/50 overflow-hidden"
+                    style={{
+                      width: `${containerWidth}px`,
+                      height: `${scaledHeight}px`,
+                    }}
+                  >
+                    <iframe
+                      key={`preview-${idx}-${pptViewMode}-${renderEpoch}`}
+                      srcDoc={processedSlide}
+                      className="border-0"
+                      title={`Slide ${idx + 1}`}
+                      sandbox="allow-same-origin allow-scripts"
+                      scrolling="no"
+                      style={{
+                        width: `${slideWidth}px`,
+                        height: `${slideHeight}px`,
+                        transform: `scale(${scale})`,
+                        transformOrigin: "top left",
+                        overflow: "hidden",
+                        margin: 0,
+                        padding: 0,
+                        border: "none",
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            });
+          })()}
+        </>
+      ) : null}
+    </div>
+  );
+
+  const shouldUseEditable = !!(isEditMode && hasEditableSlides && onSaveSlide);
 
   return (
     <div
-      className="bg-gray-50/50 h-full overflow-auto"
+      className="relative bg-gray-50/50 h-full overflow-auto"
       ref={pptViewMode === "preview" ? pptPreviewScrollRef : pptCodeScrollRef}
     >
       {pptViewMode === "preview" ? (
         <>
-          {/* 编辑模式且有 PPT 项目数据时，使用 EditablePPTPreview */}
-          {isEditMode && hasSlides && onSaveSlide ? (
+          {shouldUseEditable ? (
             <>
-              {console.log('✅ 渲染 EditablePPTPreview')}
+              {!editorReady && renderPreviewSlides()}
+              {!editorReady && (
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 px-3 py-1.5 rounded-full bg-background/95 border border-border text-xs text-muted-foreground shadow-sm">
+                  正在进入编辑模式...
+                </div>
+              )}
               <EditablePPTPreview
                 ref={editablePPTRef}
-                slides={slides}
+                slides={editableSlides}
                 isEditMode={isEditMode}
-                onSaveSlide={onSaveSlide}
+                onSaveSlide={onSaveSlide!}
+                onReady={() => setEditorReady(true)}
+                className={editorReady ? "" : "fixed left-[-99999px] top-0 w-px h-px overflow-hidden pointer-events-none"}
               />
             </>
           ) : (
-            <>
-              {console.log('❌ 渲染普通预览')}
-              {/* PPT 预览区域 - 垂直流式排列 */}
-              <div className="p-8 space-y-8">
-                {!isEmptySlides ? (
-                  <>
-                    {(() => {
-                      slideRefsPreview.current = [];
-
-                      return slidesHtml.map((slide: string, idx: number) => {
-                        const containerWidth = 836;
-                        const slideWidth = 1280;
-                        const slideHeight = 720;
-                        const scale = containerWidth / slideWidth;
-                        const scaledHeight = slideHeight * scale;
-                        const processedSlide = processSlideHtml(slide);
-
-                        return (
-                          <div
-                            key={idx}
-                            className="flex flex-col gap-3"
-                            ref={(el) => {
-                              slideRefsPreview.current[idx] = el;
-                            }}
-                          >
-                            {/* 页码标识 */}
-                            <div className="flex items-center gap-2 px-1">
-                              <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded">
-                                第 {idx + 1} 页
-                              </span>
-                              <div className="h-[1px] flex-1 bg-border/50"></div>
-                              <span className="text-[10px] text-muted-foreground/50 font-mono">
-                                1280 × 720
-                              </span>
-                            </div>
-
-                            {/* PPT 容器 */}
-                            <div
-                              className="relative shadow-xl rounded-xl bg-white border border-border/50 overflow-hidden"
-                              style={{
-                                width: `${containerWidth}px`,
-                                height: `${scaledHeight}px`,
-                              }}
-                            >
-                              {isLoadingSlides && !loadedSlidesRef.current.has(idx) && (
-                                <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/80 backdrop-blur-sm">
-                                  <div className="text-sm text-muted-foreground text-center">
-                                    <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
-                                    正在加载 PPT...
-                                  </div>
-                                </div>
-                              )}
-                              <iframe
-                                key={`preview-${idx}-${pptViewMode}-${renderEpoch}`}
-                                srcDoc={processedSlide}
-                                className="border-0"
-                                title={`Slide ${idx + 1}`}
-                                sandbox="allow-same-origin allow-scripts"
-                                scrolling="no"
-                                onLoad={() => {
-                                  if (!loadedSlidesRef.current.has(idx)) {
-                                    loadedSlidesRef.current.add(idx);
-                                    setLoadedSlidesCount(loadedSlidesRef.current.size);
-                                  }
-                                }}
-                                style={{
-                                  width: `${slideWidth}px`,
-                                  height: `${slideHeight}px`,
-                                  transform: `scale(${scale})`,
-                                  transformOrigin: "top left",
-                                  overflow: "hidden",
-                                  margin: 0,
-                                  padding: 0,
-                                  border: "none",
-                                }}
-                              />
-                            </div>
-                          </div>
-                        );
-                      });
-                    })()}
-                  </>
-                ) : (
-                  <div className="flex items-center justify-center h-[60vh]">
-                    <div className="text-sm text-muted-foreground text-center">
-                      <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
-                      正在加载 PPT...
-                    </div>
-                  </div>
-                )}
-              </div>
-            </>
+            renderPreviewSlides()
           )}
         </>
       ) : (
@@ -339,28 +420,33 @@ export default function PPTPreviewPanel({
 
                       {/* 代码块容器 */}
                       <div
-                        className="relative bg-white border border-border rounded-xl overflow-auto shadow-sm"
+                        className="relative bg-[#f8fafc] border border-slate-200 rounded-xl overflow-auto shadow-sm"
                         style={{
                           width: `${containerWidth}px`,
                           height: `${slideHeight}px`,
                         }}
                       >
-                        <pre className="text-[11px] text-gray-800 p-5 font-mono leading-relaxed m-0">
-                          <code className="block language-html">{slide}</code>
-                        </pre>
+                        <div className="text-[12px] font-mono leading-6 text-slate-700 px-0 py-2">
+                          <div className="min-w-max">
+                            {slide.split("\n").map((line, lineIndex) => (
+                              <div key={lineIndex} className="grid grid-cols-[52px_1fr] hover:bg-slate-50/80">
+                                <span className="select-none pr-3 text-right text-slate-400 border-r border-slate-200 bg-slate-50/70">
+                                  {lineIndex + 1}
+                                </span>
+                                <span
+                                  className="pl-4 pr-3 whitespace-pre"
+                                  dangerouslySetInnerHTML={{ __html: highlightCodeLine(line) }}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   ));
                 })()}
               </>
-            ) : (
-              <div className="flex items-center justify-center h-[60vh]">
-                <div className="text-sm text-muted-foreground text-center">
-                  <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
-                  正在加载代码...
-                </div>
-              </div>
-            )}
+            ) : null}
           </div>
         </>
       )}

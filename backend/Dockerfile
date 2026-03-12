@@ -42,16 +42,11 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     && pip install uv -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 COPY requirements.txt ./
-COPY pptagent/pyproject.toml pptagent/README.md ./pptagent/
-COPY pptagent/pptagent/__init__.py ./pptagent/pptagent/
 COPY deeppresenter/pyproject.toml ./deeppresenter/
-COPY deeppresenter/deeppresenter/__init__.py ./deeppresenter/deeppresenter/
+COPY deeppresenter/__init__.py ./deeppresenter/
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-
-RUN --mount=type=cache,target=/root/.cache/pip \
-    cd pptagent && pip install -e . -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     cd deeppresenter && pip install -e . -i https://pypi.tuna.tsinghua.edu.cn/simple

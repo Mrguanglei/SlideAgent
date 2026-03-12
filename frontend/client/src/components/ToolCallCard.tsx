@@ -9,10 +9,8 @@ import {
   CheckCircle2,
   Loader2,
   CalendarCheck,
-  Brain,
 } from "lucide-react";
 import type { ToolCall, RightPanelType } from "@/types";
-import ThinkingBlock from "./ThinkingBlock";
 
 // 工具调用卡片 Props
 interface ToolCallCardProps {
@@ -92,8 +90,6 @@ export default function ToolCallCard({
         return <FileSliders className="h-3.5 w-3.5 text-primary" />;
       case "ppt_generate":
         return <FileSliders className="h-3.5 w-3.5 text-white" />;
-      case "deep_thinking":
-        return <Brain className="h-3.5 w-3.5 text-primary" />;
       default:
         return <FileSliders className="h-3.5 w-3.5 text-primary" />;
     }
@@ -607,50 +603,51 @@ export default function ToolCallCard({
           </button>
         );
 
-      case "deep_thinking":
-        const thinkingData = tool.data as { content?: string };
-        const thinkingContent = thinkingData.content || "";
-        const thinkingStatus = tool.status === "running" ? "thinking" : "completed";
-        const hasThinkingContent = thinkingContent.trim().length > 0;
-
+      case "ppt_remove": {
+        const removeData = tool.data as { pageNumbers?: number[]; description?: string };
+        const removePages = removeData.pageNumbers || [];
+        const removeDesc = removeData.description || `删除第 ${removePages.join(", ")} 页`;
         return (
-          <div className="tool-card">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center">
-                  {getIcon()}
-                </div>
-                <span className="font-medium text-sm">思考过程</span>
-                {tool.status === "running" && (
-                  <span className="status-auto">进行中</span>
-                )}
-                {tool.status === "completed" && (
-                  <span className="status-confirmed">已完成</span>
-                )}
-              </div>
+          <button
+            onClick={() => onOpenPanel("ppt_preview")}
+            className="tool-button group"
+          >
+            <div className="w-5 h-5 rounded-full bg-red-50 flex items-center justify-center">
+              <FileSliders className="h-3 w-3 text-red-500" />
             </div>
-            <div className="px-4 pb-4 pt-3">
-              {hasThinkingContent ? (
-                <ThinkingBlock
-                  content={thinkingContent}
-                  status={thinkingStatus}
-                  defaultExpanded={thinkingStatus === "thinking" || isShareMode}
-                />
-              ) : (
-                <div className="thinking-pill">
-                  {tool.status === "running" ? (
-                    <>
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      <span>思考中...</span>
-                    </>
-                  ) : (
-                    <span>思考完毕</span>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
+            <span className="tool-button-text">删除页面</span>
+            <span className="text-muted-foreground text-sm truncate max-w-[300px]">{removeDesc}</span>
+            <ChevronRight className="tool-button-arrow h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
+          </button>
         );
+      }
+
+      case "ppt_edit": {
+        const editData = tool.data as { pageNumber?: number; description?: string; action?: string };
+        const editPageNum = editData.pageNumber || 0;
+        const editDesc = editData.description || editData.action || `第 ${editPageNum} 页`;
+        const editIndex = editPageNum > 0 ? editPageNum - 1 : 0;
+        return (
+          <button
+            onClick={() => {
+              onOpenPanel("ppt_preview");
+              if (onScrollToSlide) {
+                setTimeout(() => {
+                  onScrollToSlide(editIndex);
+                }, 100);
+              }
+            }}
+            className="tool-button group"
+          >
+            <div className="w-5 h-5 rounded-full bg-blue-50 flex items-center justify-center">
+              <FileSliders className="h-3 w-3 text-blue-500" />
+            </div>
+            <span className="tool-button-text">更新页面</span>
+            <span className="text-muted-foreground text-sm truncate max-w-[300px]">{editDesc}</span>
+            <ChevronRight className="tool-button-arrow h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
+          </button>
+        );
+      }
 
       default:
         return null;

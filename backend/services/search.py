@@ -58,38 +58,62 @@ async def tavily_search_standalone(query: str, max_results: int = 8) -> dict:
         return {"results": []}
 
 
-async def generate_search_queries(topic: str, supplement_data: dict) -> List[str]:
+async def generate_search_queries(
+    topic: str,
+    supplement_data: dict,
+    execution_plan: Optional[Dict] = None,
+) -> List[str]:
     """使用 LLM 生成多个不同角度的搜索关键词"""
     logger.info(f"Generating search queries for: {topic}")
 
     modules = supplement_data.get("modules", [])
     audience = supplement_data.get("audience", "")
     keywords = supplement_data.get("keywords", "")
+    execution_plan = execution_plan or {}
+    plan_dimensions = (execution_plan.get("informationDimensions") or {}).get("items", [])
+    plan_strategy = (execution_plan.get("searchStrategy") or {}).get("items", [])
+    seeded_queries = execution_plan.get("recommendedSearchQueries") or execution_plan.get("recommended_search_queries") or []
+
+    # 若规划已明确查询词，优先严格按规划执行
+    if isinstance(seeded_queries, list):
+        normalized_seeded = []
+        for item in seeded_queries:
+            q = str(item or "").strip()
+            if q:
+                normalized_seeded.append(q[:80])
+        normalized_seeded = list(dict.fromkeys(normalized_seeded))[:8]
+        if normalized_seeded:
+            logger.info(f"Use seeded queries from execution plan: {normalized_seeded}")
+            return normalized_seeded
 
     # 提取主题的核心关键词
     core_topic = extract_core_topic(topic)
 
-    prompt = f"""我需要为「{core_topic}」制作一份专业的PPT演示文稿。请你作为信息检索专家，深入思考并生成3个**完全不同维度**的搜索关键词。
+    prompt = f"""我需要为「{core_topic}」制作一份专业的PPT演示文稿。请你作为信息检索专家，深入思考并生成**足够数量**的搜索关键词，确保内容全面覆盖。
 
 **背景信息**：
 - 主题：{core_topic}
 - 目标受众：{audience}
 - 内容模块：{', '.join(modules) if modules else '待定'}
 - 重点内容：{keywords if keywords else '无'}
+- 规划信息维度：{'; '.join(plan_dimensions) if isinstance(plan_dimensions, list) and plan_dimensions else '无'}
+- 规划搜索策略：{'; '.join(plan_strategy) if isinstance(plan_strategy, list) and plan_strategy else '无'}
 
 **关键要求**：
-1. **深度思考**：不要简单套用"是什么"、"功能特点"、"使用案例"这样的模板
-2. **针对性强**：根据具体主题特点，选择最有价值的搜索角度
-3. **信息互补**：3个关键词应该覆盖完全不同的信息维度，互相补充
-4. **精准简洁**：每个关键词不超过20个字，直接可用于搜索
+1. **自主判断数量**：根据主题复杂度决定搜索词数量（简单主题5个，复杂主题可达8个），确保内容全面
+2. **深度思考**：不要简单套用"是什么"、"功能特点"、"使用案例"这样的模板
+3. **针对性强**：根据具体主题特点，选择最有价值的搜索角度
+4. **信息互补**：每个关键词覆盖完全不同的信息维度，互相补充，不重复
+5. **精准简洁**：每个关键词不超过20个字，直接可用于搜索
+6. **优先遵循规划**：若给出“规划信息维度/规划搜索策略”，搜索词必须覆盖这些维度
 
 **输出格式**：
-只输出3个搜索关键词，每行一个，不要编号、不要解释：
+只输出搜索关键词，每行一个，不要编号、不要解释：
 """
 
     try:
         response = await call_llm_api([
-            {"role": "system", "content": "你是一个资深的信息检索专家。你需要深入分析主题特点，生成最有价值的搜索关键词。不要使用固定模板，要根据具体主题灵活思考。只输出关键词，每行一个。"},
+            {"role": "system", "content": "你是一个资深的信息检索专家。你需要深入分析主题特点，根据主题复杂度自主决定搜索词数量（5-8个），生成最有价值的搜索关键词，确保内容全面覆盖。不要使用固定模板，要根据具体主题灵活思考。只输出关键词，每行一个。"},
             {"role": "user", "content": prompt}
         ])
 
@@ -114,10 +138,7 @@ async def generate_search_queries(topic: str, supplement_data: dict) -> List[str
         # 确保至少有一个查询
         if not queries:
             queries = [core_topic]
-        
-        # 最多返回3个
-        queries = queries[:4]
-        
+
         logger.info(f"Generated search queries: {queries}")
         return queries
 
@@ -135,9 +156,13 @@ async def should_use_web_search(topic: str, supplement_data: dict) -> bool:
     file_context = supplement_data.get("file_context", "")
     skip_search_flag = supplement_data.get("skip_search", False)
 
+    # 若已明确跳过搜索，直接返回 False
+    if skip_search_flag:
+        return False
+
     file_excerpt = ""
     if isinstance(file_context, str) and file_context.strip():
-        file_excerpt = file_context.strip()[:800]
+        file_excerpt = file_context.strip()
 
     prompt = f"""请判断为「{topic}」制作PPT时是否需要联网搜索资料。
 
@@ -152,7 +177,7 @@ async def should_use_web_search(topic: str, supplement_data: dict) -> bool:
 - 重点关键词：{keywords or '未提供'}
 - 是否检测到文件内容：{'是' if file_excerpt else '否'}
 - 系统提示 skip_search：{'是' if skip_search_flag else '否'}
-- 文件摘要（如有）：{file_excerpt or '无'}
+- 文件内容（如有）：{file_excerpt or '无'}
 
 只输出 YES 或 NO，不要解释。"""
 

@@ -9,7 +9,6 @@ let currentSessionId: string | null = null;
 // 工具显示名称映射
 const TOOL_DISPLAY_NAMES: Record<string, string> = {
   supplement_info: "补充信息",
-  task_plan: "任务执行规划",
   web_search: "搜索网页",
   image_search: "搜索图片",
   create_slide: "新增页面",
@@ -303,31 +302,11 @@ export async function continueConversation(
   } catch (error) {
     console.error("[PPTAgent] continueConversation error:", error);
 
-    // 如果后端不可用，返回模拟的任务规划
+    // 如果后端不可用，返回提示信息
     const topic = conversationHistory.find(m => m.role === "user")?.content || "PPT";
 
     return {
-      content: `好的，我已收到您的补充信息。现在我将为您生成任务规划。`,
-      toolCall: {
-        id: `tool-${Date.now()}`,
-        type: "task_plan",
-        name: "任务执行规划",
-        status: "auto_execute",
-        data: {
-          coreRequirement: `制作一份关于"${topic}"的PPT`,
-          details: [
-            "目标受众：企业内部汇报",
-            "内容模块：市场概况与趋势、各品牌市场份额分析、区域销量对比",
-            "设计风格：专业商务",
-          ],
-          steps: [
-            { id: 1, text: "搜索相关市场数据和报告" },
-            { id: 2, text: "整理和分析收集到的信息" },
-            { id: 3, text: "设计PPT结构和布局" },
-            { id: 4, text: "生成各页面内容" },
-          ],
-        },
-      },
+      content: `好的，我已收到您的补充信息。现在我将为您搜索相关资料并开始制作PPT。`,
     };
   }
 }
@@ -344,15 +323,6 @@ export async function executeTool(
         success: true,
         result: {
           confirmed: true,
-          data: args,
-        },
-      };
-
-    case "task_plan":
-      return {
-        success: true,
-        result: {
-          planned: true,
           data: args,
         },
       };

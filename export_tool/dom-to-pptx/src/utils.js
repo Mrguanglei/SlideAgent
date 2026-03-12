@@ -511,8 +511,14 @@ export function getTextStyle(style, scale) {
     ...(lineSpacing && { lineSpacing }),
     ...(paraSpaceBefore > 0 && { paraSpaceBefore }),
     ...(paraSpaceAfter > 0 && { paraSpaceAfter }),
-    // Map background color to highlight if present
-    ...(parseColor(style.backgroundColor).hex ? { highlight: parseColor(style.backgroundColor).hex } : {}),
+    // Map background color to highlight only if explicitly set (non-transparent)
+    ...((() => {
+      const bg = style.backgroundColor;
+      if (!bg || bg === 'transparent' || bg === 'rgba(0, 0, 0, 0)') return ;
+      const parsed = parseColor(bg);
+      if (!parsed.hex || parsed.opacity === 0) return {};
+      return { highlight: parsed.hex };
+    })()),
   };
 }
 

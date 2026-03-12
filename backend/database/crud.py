@@ -165,7 +165,10 @@ async def get_messages_by_conversation(
     ).order_by(Message.created_at)
     
     if include_tool_calls:
-        query = query.options(selectinload(Message.tool_calls))
+        query = query.options(
+            selectinload(Message.tool_calls),
+            selectinload(Message.attachments)
+        )
     
     result = await db.execute(query)
     return list(result.scalars().all())
@@ -381,14 +384,28 @@ async def get_ppt_project_by_conversation(
     db: AsyncSession,
     conversation_id: int
 ) -> Optional[PPTProject]:
-    """获取对话关联的 PPT 项目"""
+    """获取对话关联的最新 PPT 项目（兼容旧逻辑）"""
     query = select(PPTProject).where(
         PPTProject.conversation_id == conversation_id
     ).options(
         selectinload(PPTProject.versions).selectinload(PPTVersion.slides)
-    )
+    ).order_by(PPTProject.created_at.desc())
     result = await db.execute(query)
-    return result.scalar_one_or_none()
+    return result.scalars().first()
+
+
+async def get_ppt_projects_by_conversation(
+    db: AsyncSession,
+    conversation_id: int
+) -> list:
+    """获取对话下所有 PPT 项目列表（按创建时间升序）"""
+    query = select(PPTProject).where(
+        PPTProject.conversation_id == conversation_id
+    ).options(
+        selectinload(PPTProject.versions)
+    ).order_by(PPTProject.created_at.asc())
+    result = await db.execute(query)
+    return list(result.scalars().all())
 
 
 # ==================== PPT 版本相关操作 ====================
@@ -417,6 +434,27 @@ async def create_ppt_version(
     return version
 
 
+async def create_ppt_sub_version(
+    db: AsyncSession,
+    project_id: int,
+    parent_version_id: int,
+    version_number: int,
+    version_name: str,
+) -> PPTVersion:
+    """创建手动编辑子版本（不改变其他版本的 is_current 状态）"""
+    version = PPTVersion(
+        project_id=project_id,
+        version_number=version_number,
+        version_name=version_name,
+        is_current=False,
+        parent_version_id=parent_version_id,
+    )
+    db.add(version)
+    await db.flush()
+    await db.refresh(version)
+    return version
+
+
 async def get_current_ppt_version(
     db: AsyncSession,
     project_id: int
@@ -427,6 +465,15 @@ async def get_current_ppt_version(
         PPTVersion.is_current == True
     ).options(selectinload(PPTVersion.slides))
     result = await db.execute(query)
+    return result.scalar_one_or_none()
+
+
+async def get_ppt_version(
+    db: AsyncSession,
+    version_id: int
+) -> Optional[PPTVersion]:
+    """获取单个版本（按 ID）"""
+    result = await db.execute(select(PPTVersion).where(PPTVersion.id == version_id))
     return result.scalar_one_or_none()
 
 
@@ -636,19 +683,38 @@ async def update_ppt_slide(
     query = select(PPTSlide).where(PPTSlide.id == slide_id)
     result = await db.execute(query)
     slide = result.scalar_one_or_none()
-    
+
     if not slide:
         return None
-    
+
     if html_content is not None:
         slide.html_content = html_content
     if page_title is not None:
         slide.page_title = page_title
     slide.updated_at = datetime.utcnow()
-    
+
     await db.flush()
     await db.refresh(slide)
     return slide
+
+
+async def delete_ppt_slide_by_page(
+    db: AsyncSession,
+    version_id: int,
+    page_number: int,
+) -> bool:
+    """按页码删除幻灯片"""
+    query = select(PPTSlide).where(
+        PPTSlide.version_id == version_id,
+        PPTSlide.page_number == page_number,
+    )
+    result = await db.execute(query)
+    slide = result.scalar_one_or_none()
+    if not slide:
+        return False
+    await db.delete(slide)
+    await db.flush()
+    return True
 
 
 async def delete_ppt_project(
@@ -720,6 +786,9 @@ async def get_messages(
     stmt = select(Message).where(
         Message.conversation_id == conversation_id
     ).order_by(Message.created_at)
+
+    # 异步环境下避免懒加载附件
+    stmt = stmt.options(selectinload(Message.attachments))
     
     result = await db.execute(stmt)
     return list(result.scalars().all())
@@ -758,19 +827,6 @@ async def get_task_plan_by_tool_call(
     """获取工具调用的任务计划"""
     stmt = select(TaskPlan).where(
         TaskPlan.tool_call_id == tool_call_id
-    )
-    
-    result = await db.execute(stmt)
-    return result.scalar_one_or_none()
-
-
-async def get_ppt_project_by_conversation(
-    db: AsyncSession,
-    conversation_id: int
-) -> Optional[PPTProject]:
-    """获取对话关联的 PPT 项目"""
-    stmt = select(PPTProject).where(
-        PPTProject.conversation_id == conversation_id
     )
     
     result = await db.execute(stmt)
@@ -1016,14 +1072,14 @@ async def get_session_by_conversation(
     return result.scalars().first()
 
 
-# ==================== Export Caching ====================
+# ==================== Export Records ====================
 
 async def get_ppt_export(
     db: AsyncSession,
     version_id: int,
     format: str
 ) -> Optional[PPTExport]:
-    """获取导出的缓存记录"""
+    """获取指定版本+格式的最新导出记录"""
     query = select(PPTExport).where(
         PPTExport.version_id == version_id,
         PPTExport.format == format
@@ -1042,10 +1098,7 @@ async def create_ppt_export(
     file_size: int = 0,
     file_data: bytes = None
 ) -> PPTExport:
-    """创建导出缓存记录"""
-    # 先删除旧的同类缓存
-    await delete_ppt_export(db, version_id, format)
-    
+    """创建导出记录（追加历史，不覆盖旧记录）"""
     export = PPTExport(
         project_id=project_id,
         version_id=version_id,
@@ -1066,7 +1119,7 @@ async def delete_ppt_export(
     version_id: int,
     format: str
 ) -> bool:
-    """删除导出缓存记录"""
+    """删除指定版本+格式的导出记录"""
     stmt = delete(PPTExport).where(
         PPTExport.version_id == version_id,
         PPTExport.format == format
@@ -1083,5 +1136,3 @@ async def get_knowledge_document(
     query = select(KnowledgeDocument).where(KnowledgeDocument.id == document_id)
     result = await db.execute(query)
     return result.scalar_one_or_none()
-
-

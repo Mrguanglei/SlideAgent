@@ -126,10 +126,13 @@ export default function PPTPlayer() {
 
     // 注入强制样式的函数
     const processSlideHtml = (slide: string): string => {
+        const fontUrlPattern = /(https?:\/\/(?:fonts\.googleapis\.com|fonts\.gstatic\.com|cdn\.cn\.font\.mi\.com)[^"'\s)<]+)/gi;
+        const toFontCacheUrl = (url: string): string => `/api/font-cache?url=${encodeURIComponent(url)}`;
+        const cachedSlide = slide.replace(fontUrlPattern, (match) => toFontCacheUrl(match));
         const fontLinks = `
-      <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-      <link href="https://cdn.cn.font.mi.com/font/css?family=MiSans:300,400,500,600,700:Chinese_Simplify,Latin&display=swap" rel="stylesheet">
-      <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+      <link href="${toFontCacheUrl("https://fonts.googleapis.com/icon?family=Material+Icons")}" rel="stylesheet">
+      <link href="${toFontCacheUrl("https://cdn.cn.font.mi.com/font/css?family=MiSans:300,400,500,600,700:Chinese_Simplify,Latin&display=swap")}" rel="stylesheet">
+      <link href="${toFontCacheUrl("https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap")}" rel="stylesheet">
     `;
         const forceStyles = `
       ${fontLinks}
@@ -157,13 +160,13 @@ export default function PPTPlayer() {
       </style>
     `;
 
-        let processedSlide = slide;
-        if (slide.includes("</head>")) {
-            processedSlide = slide.replace("</head>", forceStyles + "</head>");
-        } else if (slide.includes("<body")) {
-            processedSlide = slide.replace("<body", forceStyles + "<body");
+        let processedSlide = cachedSlide;
+        if (cachedSlide.includes("</head>")) {
+            processedSlide = cachedSlide.replace("</head>", forceStyles + "</head>");
+        } else if (cachedSlide.includes("<body")) {
+            processedSlide = cachedSlide.replace("<body", forceStyles + "<body");
         } else {
-            processedSlide = forceStyles + slide;
+            processedSlide = forceStyles + cachedSlide;
         }
         return processedSlide;
     };

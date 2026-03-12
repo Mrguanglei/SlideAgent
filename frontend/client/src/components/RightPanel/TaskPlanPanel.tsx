@@ -44,6 +44,15 @@ export default function TaskPlanPanel({
   taskPlanStreaming,
   taskPlanContentRef,
 }: TaskPlanPanelProps) {
+  const hasStructured = !!(
+    taskPlan?.coreRequirement ||
+    taskPlan?.problemAnalysis?.items?.length ||
+    taskPlan?.informationDimensions?.items?.length ||
+    taskPlan?.searchStrategy?.items?.length ||
+    taskPlan?.steps?.length
+  );
+  const planningNarrative = (taskPlan?.thinkingNarrative || "").trim();
+
   return (
     <div className="p-4 space-y-4">
       {taskPlanStreaming && !taskPlan?.coreRequirement && (
@@ -53,8 +62,18 @@ export default function TaskPlanPanel({
         </div>
       )}
 
-      {/* 流式内容显示 */}
-      {taskPlan?.streamContent && (() => {
+      {/* 规划思考（优先显示结构化思考文案） */}
+      {planningNarrative && (
+        <div className="space-y-2">
+          <h3 className="font-medium text-sm">规划思考</h3>
+          <div className="prose prose-sm max-w-none dark:prose-invert prose-headings:text-foreground prose-strong:text-foreground">
+            <Streamdown>{planningNarrative}</Streamdown>
+          </div>
+        </div>
+      )}
+
+      {/* 兼容旧数据：仅在缺少结构化字段时显示 streamContent 原文 */}
+      {!hasStructured && taskPlan?.streamContent && (() => {
         const { thinkBlocks, normalContent } = parseThinkTags(taskPlan.streamContent);
         return (
           <div ref={taskPlanContentRef} className="space-y-3">
@@ -83,7 +102,7 @@ export default function TaskPlanPanel({
       })()}
 
       {/* 结构化内容显示 */}
-      {taskPlan && !taskPlan.streamContent && (
+      {taskPlan && (
         <>
           {/* 核心需求 */}
           {taskPlan.coreRequirement && (

@@ -279,7 +279,7 @@ export default function DownloadPopover({
                         iconBgInfo="bg-orange-100"
                         onDownload={() => handleExport("pptx", ".pptx")}
                         isLoading={loadingMap["pptx"]}
-                        extraInfo="PPTX 下载目前有问题，敬请谅解"
+                        extraInfo="PPTX下载样式可能有所差异"
                     />
                 </div>
             </PopoverContent>

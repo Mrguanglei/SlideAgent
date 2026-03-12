@@ -38,8 +38,8 @@ interface ShareToolCall {
   status: string;
   arguments: any;
   result: any;
-  search_rounds?: SearchRound[];
-  task_plan?: TaskPlan;
+  search_rounds?: SearchRoundData[];
+  task_plan?: TaskPlanData;
 }
 
 interface SearchRoundData {
@@ -137,7 +137,7 @@ export default function ShareView() {
     const loadShareData = async () => {
       try {
         const data = await getShareData(shareId);
-        setShareData(data);
+        setShareData(data as unknown as ShareData);
         
         // 转换消息格式为 MessageItem 组件所需的格式
         const convertedMessages: Message[] = data.messages.map((msg: ShareMessage) => {
@@ -168,7 +168,7 @@ export default function ShareView() {
             // 处理任务规划
             if (tc.task_plan) {
               toolData.taskPlan = {
-                content: tc.task_plan.plan_content,
+                streamContent: tc.task_plan.plan_content,
                 steps: tc.task_plan.steps || [],
               };
             }
@@ -201,7 +201,7 @@ export default function ShareView() {
               for (const tc of msg.tool_calls) {
                 if (tc.tool_type === "task_plan" && tc.task_plan) {
                   setTaskPlan({
-                    content: tc.task_plan.plan_content,
+                    streamContent: tc.task_plan.plan_content,
                     steps: tc.task_plan.steps || [],
                   });
                 }
@@ -287,10 +287,13 @@ export default function ShareView() {
             conversation_id: data.conversation.id,
             title: project.title,
             outline_content: project.outline_content,
+            created_at: data.conversation.created_at,
+            updated_at: data.conversation.created_at,
             versions: [{
               id: 1,
               version_number: 1,
               version_name: "V1",
+              created_at: data.conversation.created_at,
               slides: project.slides.map((slide: Slide) => ({
                 id: slide.id,
                 page_number: slide.page_number,
@@ -302,6 +305,7 @@ export default function ShareView() {
               id: 1,
               version_number: 1,
               version_name: "V1",
+              created_at: data.conversation.created_at,
               slides: project.slides.map((slide: Slide) => ({
                 id: slide.id,
                 page_number: slide.page_number,

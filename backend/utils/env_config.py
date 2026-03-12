@@ -104,13 +104,12 @@ class EnvConfig:
         try:
             import sys
             sys.path.insert(0, "/app/pptagent")
-            sys.path.insert(0, "/app/deeppresenter")
             sys.path.insert(0, "/app")
-            
-            from deeppresenter.agents.slide_design import SlideDesign
-            from deeppresenter.agents.env import AgentEnv
+
+            from deeppresenter.agents.slide_design_agent import SlideDesign
+            from deeppresenter.agents.tool_executor import AgentEnv
             from deeppresenter.utils.typings import InputRequest, PowerPointType, ConvertType, ChatMessage
-            
+
             cls.DEEPPRESENTER_AVAILABLE = True
             logger.info("✓ DeepPresenter module loaded")
         except ImportError as e:
@@ -163,38 +162,6 @@ class EnvConfig:
             },
         }
     
-    @classmethod
-    def to_mcp_config(cls) -> list:
-        """
-        转换为 MCP 兼容的配置格式
-        用于替代 mcp.json
-        """
-        return [
-            {
-                "name": "deeppresenter",
-                "description": "DeepPresenter Tools",
-                "command": "python",
-                "args": ["/app/deeppresenter/deeppresenter/tools/server.py", "$WORKSPACE"],
-                "env": {
-                    "MINERU_API_KEY": cls.MINERU_API_KEY or "",
-                    "TAVILY_API_KEY": cls.TAVILY_API_KEY or "",
-                    "TAVILY_BACKUP": cls.TAVILY_BACKUP or "",
-                    "LLM_CONFIG_FILE": "$LLM_CONFIG_FILE",
-                }
-            },
-            {
-                "name": "pptagent",
-                "description": "https://github.com/icip-cas/PPTAgent",
-                "command": "pptagent-mcp",
-                "args": [],
-                "env": {
-                    "PPTAGENT_MODEL": cls.PPTAGENT_MODEL,
-                    "PPTAGENT_API_KEY": cls.PPTAGENT_API_KEY or "",
-                    "PPTAGENT_API_BASE": cls.PPTAGENT_API_BASE or "",
-                }
-            }
-        ]
-
 
 # 全局配置实例
 env_config = EnvConfig()

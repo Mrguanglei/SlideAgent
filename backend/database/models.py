@@ -181,8 +181,9 @@ class PPTVersion(Base):
     version_number = Column(Integer, nullable=False, default=1)
     version_name = Column(String(100), nullable=True)  # 如 "初稿", "修改版"
     is_current = Column(Boolean, default=True)  # 是否为当前版本
+    parent_version_id = Column(BigInteger, nullable=True)  # 手动编辑子版本的父版本 ID
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
-    
+
     # 关系
     project = relationship("PPTProject", back_populates="versions")
     slides = relationship("PPTSlide", back_populates="version", cascade="all, delete-orphan")

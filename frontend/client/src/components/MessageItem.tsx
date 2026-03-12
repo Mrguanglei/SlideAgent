@@ -6,6 +6,7 @@ import planetAnimationRaw from "@/assets/planet.json?raw";
 import ToolCallCard from "./ToolCallCard";
 import ThinkingBlock from "./ThinkingBlock";
 import type { Message, RightPanelType } from "@/types";
+import { FileText } from "lucide-react";
 
 // 解析消息中的 <think> 标签
 // 返回结构化数据，status 用于控制组件显隐
@@ -21,6 +22,25 @@ interface ThinkParseResult {
 }
 
 const planetAnimationData = JSON.parse(planetAnimationRaw) as object;
+
+function formatFileSize(bytes?: number): string {
+  if (!bytes || bytes <= 0) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  let size = bytes;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  const value = unitIndex === 0 ? `${Math.round(size)}` : size.toFixed(2);
+  return `${value}${units[unitIndex]}`;
+}
+
+function getFileExt(filename: string): string {
+  const parts = filename.split(".");
+  if (parts.length <= 1) return "";
+  return parts[parts.length - 1].toUpperCase();
+}
 
 function parseThinkTags(content: string): ThinkParseResult {
   // 1. 提取完整的 <think>...</think> 块 (大小写不敏感)
@@ -162,7 +182,35 @@ export default function MessageItem({
           )}
           {/* 用户消息内容 - 与名称对齐 */}
           <div className="pl-8">
-            <p className="leading-relaxed whitespace-pre-wrap text-foreground">{message.content}</p>
+            {message.content && (
+              <p className="leading-relaxed whitespace-pre-wrap text-foreground">{message.content}</p>
+            )}
+            {message.attachments && message.attachments.length > 0 && (
+              <div className="mt-3 flex flex-col gap-2">
+                {message.attachments.map((att, idx) => {
+                  const ext = getFileExt(att.filename || "");
+                  const sizeLabel = formatFileSize(att.file_size);
+                  return (
+                    <div
+                      key={`${att.filename}-${idx}`}
+                      className="flex items-center gap-3 rounded-2xl border border-border/60 bg-muted/60 px-4 py-3 shadow-sm max-w-[420px]"
+                    >
+                      <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-white shadow-sm">
+                        <FileText className="h-6 w-6" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-foreground truncate max-w-[280px]">
+                          {att.filename}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {ext || "FILE"}{sizeLabel ? `  ${sizeLabel}` : ""}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       ) : (

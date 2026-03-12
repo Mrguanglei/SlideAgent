@@ -76,7 +76,7 @@ export const appRouter = router({
           setCurrentSessionId(input.sessionId);
         }
 
-        // 用户确认补充信息后，继续生成任务规划
+        // 用户确认补充信息后，继续生成PPT
         const conversationHistory = [
           { role: "user" as const, content: `请帮我制作一份关于"${input.topic}"的PPT` },
           { role: "assistant" as const, content: `好的，我已收到您的补充信息：${JSON.stringify(input.selectedData)}。现在我将为您生成任务规划。` },

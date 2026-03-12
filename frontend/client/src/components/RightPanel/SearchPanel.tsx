@@ -1,6 +1,7 @@
 import { useRef, useEffect } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Globe } from "lucide-react";
+import { Globe, Loader2 } from "lucide-react";
+import ThinkingBlock from "@/components/ThinkingBlock";
 import type { SearchRound } from "@/types";
 
 interface SearchPanelProps {
@@ -14,19 +15,41 @@ interface SearchPanelProps {
 export default function SearchPanel({
   searchRounds,
   currentSearchRound,
+  deepThinking,
+  deepThinkingStreaming,
 }: SearchPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const getViewport = () =>
+    scrollRef.current?.querySelector("[data-slot='scroll-area-viewport']") as HTMLDivElement | null;
 
   // 根据 currentSearchRound 获取对应的搜索轮次
   const currentRound = searchRounds.find(r => r.round === currentSearchRound)
     || (searchRounds.length > 0 ? searchRounds[searchRounds.length - 1] : null);
+  const lastRound = searchRounds.length > 0
+    ? searchRounds.reduce((max, item) => (item.round > max ? item.round : max), searchRounds[0].round)
+    : null;
+  const isLastRound = !!currentRound && currentRound.round === lastRound;
+  const thinkingContent = (currentRound?.thinking || "").trim() || (isLastRound ? (deepThinking || "").trim() : "");
 
   // 自动滚动到顶部当新搜索开始时
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = 0;
+    const viewport = getViewport();
+    if (viewport) {
+      viewport.scrollTop = 0;
     }
   }, [currentRound?.round]);
+
+  // 最后一轮思考流式输出时，自动滚动到底部，确保用户能看到最新思考内容
+  useEffect(() => {
+    if (!isLastRound || (!thinkingContent && !deepThinkingStreaming)) return;
+    const raf = requestAnimationFrame(() => {
+      const viewport = getViewport();
+      if (viewport) {
+        viewport.scrollTop = viewport.scrollHeight;
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [isLastRound, thinkingContent, deepThinkingStreaming, currentRound?.results.length]);
 
   return (
     <div className="flex flex-col h-full">
@@ -47,51 +70,70 @@ export default function SearchPanel({
               暂无搜索结果
             </div>
           ) : currentRound.results.length > 0 ? (
-            currentRound.results.map((result, index) => (
-              <a
-                key={index}
-                href={result.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block hover:bg-muted/50 rounded-lg p-3 -mx-1 transition-colors"
-              >
-                {/* 来源信息 */}
-                <div className="flex items-center gap-2 mb-1.5">
-                  <div className="w-4 h-4 rounded-full bg-muted flex items-center justify-center">
-                    <Globe className="h-2.5 w-2.5 text-muted-foreground" />
+            <>
+              {currentRound.results.map((result, index) => (
+                <a
+                  key={index}
+                  href={result.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block hover:bg-muted/50 rounded-lg p-3 -mx-1 transition-colors"
+                >
+                  {/* 来源信息 */}
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <div className="w-4 h-4 rounded-full bg-muted flex items-center justify-center">
+                      <Globe className="h-2.5 w-2.5 text-muted-foreground" />
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {(() => {
+                        try {
+                          return new URL(result.url).hostname;
+                        } catch {
+                          return result.url || "unknown";
+                        }
+                      })()}
+                    </span>
+                    {result.date && (
+                      <>
+                        <span className="text-xs text-muted-foreground">·</span>
+                        <span className="text-xs text-muted-foreground">
+                          {result.date}
+                        </span>
+                      </>
+                    )}
                   </div>
-                  <span className="text-xs text-muted-foreground">
-                    {(() => {
-                      try {
-                        return new URL(result.url).hostname;
-                      } catch {
-                        return result.url || "unknown";
-                      }
-                    })()}
-                  </span>
-                  {result.date && (
-                    <>
-                      <span className="text-xs text-muted-foreground">·</span>
-                      <span className="text-xs text-muted-foreground">
-                        {result.date}
-                      </span>
-                    </>
+
+                  {/* 标题 */}
+                  <h4 className="font-medium text-sm mb-1 text-foreground hover:text-primary transition-colors line-clamp-2">
+                    {result.title}
+                  </h4>
+
+                  {/* 摘要 */}
+                  {result.snippet && (
+                    <p className="text-xs text-muted-foreground line-clamp-2">
+                      {result.snippet}
+                    </p>
+                  )}
+                </a>
+              ))}
+
+              {isLastRound && (thinkingContent || deepThinkingStreaming) && (
+                <div className="pt-3 mt-2 border-t border-border/60">
+                  {thinkingContent ? (
+                    <ThinkingBlock
+                      content={thinkingContent}
+                      status={deepThinkingStreaming ? "thinking" : "completed"}
+                      defaultExpanded={deepThinkingStreaming}
+                    />
+                  ) : (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>正在整理搜索结论...</span>
+                    </div>
                   )}
                 </div>
-
-                {/* 标题 */}
-                <h4 className="font-medium text-sm mb-1 text-foreground hover:text-primary transition-colors line-clamp-2">
-                  {result.title}
-                </h4>
-
-                {/* 摘要 */}
-                {result.snippet && (
-                  <p className="text-xs text-muted-foreground line-clamp-2">
-                    {result.snippet}
-                  </p>
-                )}
-              </a>
-            ))
+              )}
+            </>
           ) : (
             <div className="flex items-center justify-center py-8">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">

@@ -3,6 +3,7 @@ import express from "express";
 import AdmZip from "adm-zip";
 import fs from "fs/promises";
 import path from "path";
+import { createHash } from "crypto";
 import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
@@ -13,6 +14,59 @@ import { serveStatic, setupVite } from "./vite";
 
 // Python 后端地址
 const BACKEND_URL = process.env.BACKEND_URL || "http://backend:8000";
+const FONT_CACHE_DIR = process.env.FONT_CACHE_DIR || "/tmp/pptagent_font_cache";
+const FONT_ALLOWED_HOSTS = new Set([
+  "fonts.googleapis.com",
+  "fonts.gstatic.com",
+  "cdn.cn.font.mi.com",
+]);
+const FAILED_FETCH_COOLDOWN_MS = 5 * 60 * 1000; // 5 分钟失败冷却
+const failedFetchUntil = new Map<string, number>();
+const failedFetchLogged = new Set<string>();
+
+function getFontCacheKey(url: string): string {
+  return createHash("sha256").update(url).digest("hex");
+}
+
+function getFontCachePaths(url: string) {
+  const key = getFontCacheKey(url);
+  return {
+    dataPath: path.join(FONT_CACHE_DIR, `${key}.bin`),
+    metaPath: path.join(FONT_CACHE_DIR, `${key}.json`),
+  };
+}
+
+function toFontCacheUrl(rawUrl: string): string {
+  return `/api/font-cache?url=${encodeURIComponent(rawUrl)}`;
+}
+
+function isAllowedFontUrl(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl);
+    return (parsed.protocol === "https:" || parsed.protocol === "http:") && FONT_ALLOWED_HOSTS.has(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function rewriteCssFontUrls(css: string): string {
+  return css.replace(/url\((['"]?)(https?:\/\/[^'")\s]+)\1\)/gi, (full, quote, url: string) => {
+    if (!isAllowedFontUrl(url)) return full;
+    return `url(${quote || ""}${toFontCacheUrl(url)}${quote || ""})`;
+  });
+}
+
+function getMiSansFallbackCss(): string {
+  return `
+/* MiSans unavailable, fallback to local/system fonts */
+@font-face {
+  font-family: "MiSans";
+  src: local("Noto Sans SC"), local("PingFang SC"), local("Microsoft YaHei"), local("sans-serif");
+  font-weight: 300 700;
+  font-style: normal;
+}
+`;
+}
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -43,6 +97,109 @@ async function startServer() {
   registerOAuthRoutes(app);
   const demoDir =
     process.env.PPT_DEMO_DIR || path.resolve(process.cwd(), "..", "PPT_demo");
+
+  app.get("/api/font-cache", async (req, res) => {
+    try {
+      const rawUrl = typeof req.query.url === "string" ? req.query.url : "";
+      if (!rawUrl) {
+        res.status(400).json({ error: "Missing url query param" });
+        return;
+      }
+      if (!isAllowedFontUrl(rawUrl)) {
+        res.status(403).json({ error: "URL host is not allowed" });
+        return;
+      }
+
+      const parsedUrl = new URL(rawUrl);
+      // MiSans 域名在部分容器网络下不可解析：直接返回可缓存的降级 CSS，避免反复网络失败
+      if (parsedUrl.hostname === "cdn.cn.font.mi.com") {
+        const fallbackCss = getMiSansFallbackCss();
+        const contentType = "text/css; charset=utf-8";
+        res.setHeader("Content-Type", contentType);
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+
+        await fs.mkdir(FONT_CACHE_DIR, { recursive: true });
+        const { dataPath, metaPath } = getFontCachePaths(rawUrl);
+        await Promise.all([
+          fs.writeFile(dataPath, Buffer.from(fallbackCss, "utf-8")),
+          fs.writeFile(metaPath, JSON.stringify({ contentType }), "utf-8"),
+        ]);
+
+        res.send(fallbackCss);
+        return;
+      }
+
+      const now = Date.now();
+      const failedUntil = failedFetchUntil.get(rawUrl);
+      if (failedUntil && failedUntil > now) {
+        res.status(502).json({ error: "Font upstream temporarily unavailable", retryAfterMs: failedUntil - now });
+        return;
+      }
+
+      await fs.mkdir(FONT_CACHE_DIR, { recursive: true });
+      const { dataPath, metaPath } = getFontCachePaths(rawUrl);
+
+      try {
+        const [cachedBody, cachedMetaText] = await Promise.all([
+          fs.readFile(dataPath),
+          fs.readFile(metaPath, "utf-8"),
+        ]);
+        const cachedMeta = JSON.parse(cachedMetaText) as { contentType?: string };
+        if (cachedMeta.contentType) {
+          res.setHeader("Content-Type", cachedMeta.contentType);
+        }
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        res.send(cachedBody);
+        return;
+      } catch {
+        // cache miss, continue fetching
+      }
+
+      const upstream = await fetch(rawUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 PPTAgent Font Cache",
+          "Accept": "*/*",
+        },
+      });
+
+      if (!upstream.ok) {
+        res.status(upstream.status).send(await upstream.text());
+        return;
+      }
+
+      let contentType = upstream.headers.get("content-type") || "application/octet-stream";
+      let bodyBuffer = Buffer.from(await upstream.arrayBuffer());
+
+      if (contentType.includes("text/css")) {
+        const rewrittenCss = rewriteCssFontUrls(bodyBuffer.toString("utf-8"));
+        bodyBuffer = Buffer.from(rewrittenCss, "utf-8");
+        contentType = "text/css; charset=utf-8";
+      }
+
+      await Promise.all([
+        fs.writeFile(dataPath, bodyBuffer),
+        fs.writeFile(metaPath, JSON.stringify({ contentType }), "utf-8"),
+      ]);
+      failedFetchUntil.delete(rawUrl);
+      failedFetchLogged.delete(rawUrl);
+
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      res.send(bodyBuffer);
+    } catch (error) {
+      const rawUrl = typeof req.query.url === "string" ? req.query.url : "";
+      if (rawUrl) {
+        failedFetchUntil.set(rawUrl, Date.now() + FAILED_FETCH_COOLDOWN_MS);
+        if (!failedFetchLogged.has(rawUrl)) {
+          console.error("[FontCache] failed:", error);
+          failedFetchLogged.add(rawUrl);
+        }
+      } else {
+        console.error("[FontCache] failed:", error);
+      }
+      res.status(500).json({ error: "Failed to load font resource" });
+    }
+  });
 
   const proxySSE = async (req: express.Request, res: express.Response, backendPath: string) => {
     try {

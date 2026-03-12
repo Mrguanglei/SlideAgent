@@ -176,7 +176,17 @@ async def get_conversation(
             "role": msg.role,
             "content": msg.content,
             "created_at": msg.created_at.isoformat(),
-            "tool_calls": []
+            "tool_calls": [],
+            "attachments": [
+                {
+                    "id": att.id,
+                    "filename": att.filename,
+                    "file_path": att.file_path,
+                    "file_size": att.file_size,
+                    "content_type": att.content_type,
+                }
+                for att in (msg.attachments or [])
+            ],
         }
 
         # 获取该消息的工具调用
@@ -229,34 +239,52 @@ async def get_conversation(
 
         messages_with_tools.append(msg_dict)
 
-    # 获取关联的 PPT 项目
-    ppt_project = await crud.get_ppt_project_by_conversation(db, conversation_id)
-    ppt_project_dict = None
-    if ppt_project:
+    # 获取对话下所有 PPT 项目（含所有版本和幻灯片）
+    all_projects = await crud.get_ppt_projects_by_conversation(db, conversation_id)
+    ppt_projects_list = []
+    ppt_project_dict = None  # 兼容旧字段：取最新的一个
+    for ppt_project in all_projects:
         clean_title = _strip_think_tags(ppt_project.title) or (ppt_project.title or "")
-        # 获取最新版本
         latest_version = await crud.get_latest_ppt_version(db, ppt_project.id)
+        all_versions = await crud.get_ppt_versions(db, ppt_project.id)
+        versions_list = []
         slides = []
-        if latest_version:
-            slides_list = await crud.get_ppt_slides(db, latest_version.id)
-            slides = [
+        for v in all_versions:
+            v_slides_list = await crud.get_ppt_slides(db, v.id)
+            v_slides = [
                 {
                     "id": s.id,
                     "page_number": s.page_number,
                     "page_title": s.page_title,
                     "html_content": s.html_content
                 }
-                for s in slides_list
+                for s in v_slides_list
             ]
-
-        ppt_project_dict = {
+            versions_list.append({
+                "id": v.id,
+                "version_number": v.version_number,
+                "version_name": v.version_name,
+                "created_at": v.created_at.isoformat() if v.created_at else None,
+                "slides": v_slides,
+            })
+            if latest_version and v.id == latest_version.id:
+                slides = v_slides
+        proj_dict = {
             "id": ppt_project.id,
             "title": clean_title,
             "outline_content": ppt_project.outline_content,
-            "current_version": latest_version.version_number if latest_version else 1,
-            "version_name": latest_version.version_name if latest_version else "V1",
-            "slides": slides
+            "current_version": {
+                "id": latest_version.id if latest_version else None,
+                "version_number": latest_version.version_number if latest_version else 1,
+                "version_name": latest_version.version_name if latest_version else None,
+                "created_at": latest_version.created_at.isoformat() if latest_version and latest_version.created_at else None,
+                "slides": slides,
+            },
+            "versions": versions_list,
+            "slides": slides,
         }
+        ppt_projects_list.append(proj_dict)
+        ppt_project_dict = proj_dict  # 最后一个（最新）作为兼容字段
 
     return {
         "conversation": {
@@ -270,7 +298,8 @@ async def get_conversation(
         },
         "search_mode": search_mode,
         "messages": messages_with_tools,
-        "ppt_project": ppt_project_dict
+        "ppt_project": ppt_project_dict,
+        "ppt_projects": ppt_projects_list,
     }
 
 
@@ -308,7 +337,17 @@ async def get_conversation_by_uuid(
             "role": msg.role,
             "content": msg.content,
             "created_at": msg.created_at.isoformat(),
-            "tool_calls": []
+            "tool_calls": [],
+            "attachments": [
+                {
+                    "id": att.id,
+                    "filename": att.filename,
+                    "file_path": att.file_path,
+                    "file_size": att.file_size,
+                    "content_type": att.content_type,
+                }
+                for att in (msg.attachments or [])
+            ],
         }
 
         # 获取该消息的工具调用
@@ -361,34 +400,52 @@ async def get_conversation_by_uuid(
 
         messages_with_tools.append(msg_dict)
 
-    # 获取关联的 PPT 项目
-    ppt_project = await crud.get_ppt_project_by_conversation(db, conversation_id)
+    # 获取对话下所有 PPT 项目（含所有版本和幻灯片）
+    all_projects = await crud.get_ppt_projects_by_conversation(db, conversation_id)
+    ppt_projects_list = []
     ppt_project_dict = None
-    if ppt_project:
+    for ppt_project in all_projects:
         clean_title = _strip_think_tags(ppt_project.title) or (ppt_project.title or "")
-        # 获取最新版本
         latest_version = await crud.get_latest_ppt_version(db, ppt_project.id)
+        all_versions = await crud.get_ppt_versions(db, ppt_project.id)
+        versions_list = []
         slides = []
-        if latest_version:
-            slides_list = await crud.get_ppt_slides(db, latest_version.id)
-            slides = [
+        for v in all_versions:
+            v_slides_list = await crud.get_ppt_slides(db, v.id)
+            v_slides = [
                 {
                     "id": s.id,
                     "page_number": s.page_number,
                     "page_title": s.page_title,
                     "html_content": s.html_content
                 }
-                for s in slides_list
+                for s in v_slides_list
             ]
-
-        ppt_project_dict = {
+            versions_list.append({
+                "id": v.id,
+                "version_number": v.version_number,
+                "version_name": v.version_name,
+                "created_at": v.created_at.isoformat() if v.created_at else None,
+                "slides": v_slides,
+            })
+            if latest_version and v.id == latest_version.id:
+                slides = v_slides
+        proj_dict = {
             "id": ppt_project.id,
             "title": clean_title,
             "outline_content": ppt_project.outline_content,
-            "current_version": latest_version.version_number if latest_version else 1,
-            "version_name": latest_version.version_name if latest_version else "V1",
-            "slides": slides
+            "current_version": {
+                "id": latest_version.id if latest_version else None,
+                "version_number": latest_version.version_number if latest_version else 1,
+                "version_name": latest_version.version_name if latest_version else None,
+                "created_at": latest_version.created_at.isoformat() if latest_version and latest_version.created_at else None,
+                "slides": slides,
+            },
+            "versions": versions_list,
+            "slides": slides,
         }
+        ppt_projects_list.append(proj_dict)
+        ppt_project_dict = proj_dict
 
     return {
         "conversation": {
@@ -403,7 +460,8 @@ async def get_conversation_by_uuid(
         "task_status": task_status,
         "search_mode": search_mode,
         "messages": messages_with_tools,
-        "ppt_project": ppt_project_dict
+        "ppt_project": ppt_project_dict,
+        "ppt_projects": ppt_projects_list,
     }
 
 

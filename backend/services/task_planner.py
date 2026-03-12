@@ -1,32 +1,52 @@
 """
 PPTAgent 任务规划服务模块
 
-提供补充信息生成、任务规划生成、大纲生成等功能
+保留：
+- build_task_steps() — 生成任务步骤
+- generate_execution_plan() — 生成结构化执行规划
+- stream_outline_generation() — 流式生成 PPT 大纲
+
+已删除（不再需要）：
+- check_ppt_intent() → 改用 utils/helpers.py 中的关键词判断
+- generate_task_steps_with_llm() → 纯展示用，删除
+- stream_task_plan_with_llm() → 纯展示用，删除
+- parse_task_plan_text() → 配套函数，删除
+- generate_supplement_info_with_llm() → 改用 utils/helpers.py 中的固定模板
+- analyze_user_intent_for_paused_session() → 删除
 """
 
 import json
 import logging
 import re
-from typing import Dict, Optional, AsyncGenerator, Tuple, List
+from typing import AsyncGenerator, Dict, List, Optional
 
-from services.llm import call_llm_api, call_llm_api_stream, clean_json_response
-from utils.config import Config
+from services.llm import call_llm_api, call_llm_api_stream, extract_core_topic
+from utils.text_excerpt import build_prompt_context
 
 logger = logging.getLogger(__name__)
 
 
-def _strip_think_tags(text: str) -> str:
-    if not text:
-        return ""
-    cleaned = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE)
-    cleaned = re.sub(r"<think>[\s\S]*$", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
-    cleaned = cleaned.lstrip("：:，,。. ")
-    return cleaned
+def _resolve_num_pages(num_pages_range) -> int:
+    if isinstance(num_pages_range, str):
+        if "8-10" in num_pages_range:
+            return 9
+        if "11-15" in num_pages_range:
+            return 13
+        if "16-20" in num_pages_range:
+            return 18
+        if "21-25" in num_pages_range:
+            return 23
+        m = re.search(r"\d+", num_pages_range)
+        if m:
+            return max(6, min(30, int(m.group(0))))
+        return 10
+    try:
+        return max(6, min(30, int(num_pages_range)))
+    except Exception:
+        return 10
 
 
-def build_task_steps(supplement_data: dict) -> list:
-    """根据补充信息生成任务步骤（避免在关闭联网时出现搜索步骤）"""
+def _should_search(supplement_data: dict) -> bool:
     supplement_data = supplement_data or {}
     search_mode = str(supplement_data.get("search_mode", "auto")).strip().lower()
     if search_mode not in ("auto", "on", "off"):
@@ -43,484 +63,265 @@ def build_task_steps(supplement_data: dict) -> list:
         if skip_search or (isinstance(file_context, str) and file_context.strip()):
             should_search = False
 
-    first_step = "搜索相关资料和数据" if should_search else "梳理已有资料与关键信息"
+    return should_search
 
-    return [
-        {"id": 1, "text": first_step, "status": "pending"},
-        {"id": 2, "text": "整理内容大纲", "status": "pending"},
-        {"id": 3, "text": "设计页面布局", "status": "pending"},
-        {"id": 4, "text": "生成各页幻灯片", "status": "pending"},
-        {"id": 5, "text": "优化和导出PPT", "status": "pending"},
+
+def _clean_json_text(text: str) -> str:
+    if not text:
+        return ""
+    text = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE)
+    return text.strip()
+
+
+def _normalize_string_list(items, max_items: int = 6) -> List[str]:
+    if not isinstance(items, list):
+        return []
+    result: List[str] = []
+    for item in items:
+        s = str(item or "").strip()
+        if not s:
+            continue
+        result.append(s[:120])
+        if len(result) >= max_items:
+            break
+    return result
+
+
+def _ensure_dict(value) -> Dict:
+    return value if isinstance(value, dict) else {}
+
+
+def build_task_steps(supplement_data: dict, plan: Optional[Dict] = None) -> list:
+    """根据补充信息与规划结果生成执行步骤"""
+    should_search = _should_search(supplement_data or {})
+    default_first = "按规划策略检索证据与数据" if should_search else "梳理已有资料并提取关键证据"
+    default_steps = [
+        {"id": 1, "text": default_first, "status": "pending"},
+        {"id": 2, "text": "构建页面故事线与章节结构", "status": "pending"},
+        {"id": 3, "text": "生成逐页大纲并标注重点页", "status": "pending"},
+        {"id": 4, "text": "按大纲完成版式设计与内容填充", "status": "pending"},
+        {"id": 5, "text": "一致性校对与交付优化", "status": "pending"},
     ]
 
+    raw_steps = (plan or {}).get("steps")
+    if not isinstance(raw_steps, list) or not raw_steps:
+        return default_steps
 
-async def generate_task_steps_with_llm(
-    topic: str,
-    supplement_data: dict,
-    plan_text: str
-) -> List[Dict]:
-    """让模型生成执行步骤（避免固定模板）"""
+    normalized_steps = []
+    for i, step in enumerate(raw_steps[:8], 1):
+        if isinstance(step, dict):
+            text = str(step.get("text") or step.get("name") or "").strip()
+        else:
+            text = str(step or "").strip()
+        if not text:
+            continue
+        normalized_steps.append({"id": i, "text": text[:120], "status": "pending"})
+
+    return normalized_steps or default_steps
+
+
+def _build_plan_markdown(plan: Dict) -> str:
+    lines = []
+    thinking = str(plan.get("thinkingNarrative") or "").strip()
+    if thinking:
+        lines.append("规划思考：")
+        lines.append(thinking)
+
+    core = str(plan.get("coreRequirement") or "").strip()
+    if core:
+        lines.append(f"核心需求：{core}")
+
+    problem_items = ((plan.get("problemAnalysis") or {}).get("items") or [])[:4]
+    if problem_items:
+        lines.append("关键问题：")
+        lines.extend([f"- {str(x).strip()}" for x in problem_items if str(x).strip()])
+
+    info_items = ((plan.get("informationDimensions") or {}).get("items") or [])[:5]
+    if info_items:
+        lines.append("信息维度：")
+        lines.extend([f"- {str(x).strip()}" for x in info_items if str(x).strip()])
+
+    search_items = ((plan.get("searchStrategy") or {}).get("items") or [])[:5]
+    if search_items:
+        lines.append("检索策略：")
+        lines.extend([f"- {str(x).strip()}" for x in search_items if str(x).strip()])
+
+    return "\n".join(lines).strip()
+
+
+def build_plan_stream_chunks(plan: Dict, chunk_size: int = 80) -> List[str]:
+    """将规划内容拆成可流式推送的文本块。"""
+    text = str(plan.get("plan_content") or "").strip()
+    if not text:
+        text = _build_plan_markdown(plan)
+    if not text:
+        return []
+
+    chunks: List[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        line = f"{line}\n"
+        if len(line) <= chunk_size:
+            chunks.append(line)
+            continue
+        for i in range(0, len(line), chunk_size):
+            chunks.append(line[i:i + chunk_size])
+    return chunks
+
+
+async def generate_execution_plan(topic: str, supplement_data: dict) -> Dict:
+    """生成结构化执行规划，供面板展示并驱动后续执行链路"""
     supplement_data = supplement_data or {}
-    audience = supplement_data.get("audience", "专业人士")
+    should_search = _should_search(supplement_data)
+    num_pages = _resolve_num_pages(supplement_data.get("num_pages", "8-10页"))
+
+    normalized_topic = extract_core_topic(str(supplement_data.get("topic") or "").strip() or (topic or ""))
+    audience = supplement_data.get("audience", "")
     modules = supplement_data.get("modules", [])
-    style = supplement_data.get("style", "简约现代")
-    keywords = supplement_data.get("keywords", "")
+    style = supplement_data.get("style", "")
+    emphasis = supplement_data.get("keywords") or supplement_data.get("emphasis") or ""
     file_context = supplement_data.get("file_context", "")
+    file_excerpt = build_prompt_context(file_context, max_chars=1200)
 
-    search_mode = str(supplement_data.get("search_mode", "auto")).strip().lower()
-    if search_mode not in ("auto", "on", "off"):
-        search_mode = "auto"
-    skip_search = bool(supplement_data.get("skip_search", False))
+    prompt = f"""你是资深演示策略顾问。请为「{normalized_topic or topic}」生成“可执行的任务规划”，并严格输出 JSON。
 
-    should_avoid_search = search_mode == "off" or skip_search or (
-        isinstance(file_context, str) and file_context.strip()
-    )
+输入信息：
+- 目标受众：{audience or "未提供"}
+- 内容模块：{", ".join(modules) if isinstance(modules, list) and modules else "未提供"}
+- 风格偏好：{style or "未提供"}
+- 页数目标：{num_pages} 页
+- 重点要求：{emphasis or "未提供"}
+- 是否需要联网搜索：{"是" if should_search else "否"}
+- 已有资料摘要：{file_excerpt or "无"}
 
-    constraints = [
-        "步骤用中文短句",
-        "输出4到7条即可",
-        "不要包含编号或前缀，只输出JSON数组",
-    ]
-    if should_avoid_search:
-        constraints.append("不要出现“搜索/查找/联网/外部资料”等字样")
-        constraints.append("第一步从整理已有资料或明确需求开始")
-
-    prompt = f"""请根据以下信息生成PPT任务的执行步骤。
-
-主题：{topic}
-受众：{audience}
-模块：{', '.join(modules) if modules else '待定'}
-风格：{style}
-重点：{keywords if keywords else '无'}
-任务规划摘要：
-{plan_text[:1200]}
-
-要求：
-{chr(10).join(f"- {c}" for c in constraints)}
-
-输出格式示例：
-[
-  "第一步内容",
-  "第二步内容",
-  "第三步内容"
-]
-"""
-
-    try:
-        response = await call_llm_api([
-            {"role": "system", "content": "你是任务规划助手，只输出JSON数组。"},
-            {"role": "user", "content": prompt}
-        ])
-        response = clean_json_response(response or "")
-        if not response.strip():
-            return build_task_steps(supplement_data)
-
-        parsed = json.loads(response)
-        steps_raw = None
-        if isinstance(parsed, list):
-            steps_raw = parsed
-        elif isinstance(parsed, dict):
-            steps_raw = parsed.get("steps") or parsed.get("items")
-
-        if not steps_raw or not isinstance(steps_raw, list):
-            return build_task_steps(supplement_data)
-
-        steps_clean = []
-        for item in steps_raw:
-            if isinstance(item, str):
-                text = item.strip()
-            elif isinstance(item, dict):
-                text = str(item.get("text") or item.get("content") or "").strip()
-            else:
-                text = ""
-            if text:
-                steps_clean.append(text)
-
-        if not steps_clean:
-            return build_task_steps(supplement_data)
-
-        steps_clean = steps_clean[:7]
-        return [
-            {"id": idx + 1, "text": text, "status": "pending"}
-            for idx, text in enumerate(steps_clean)
-        ]
-    except Exception as e:
-        logger.error(f"Failed to generate task steps: {e}")
-        return build_task_steps(supplement_data)
-
-
-async def check_ppt_intent(instruction: str) -> bool:
-    """检查用户输入是否是 PPT 制作需求"""
-    if not Config.LLM_API_KEY:
-        # 如果没有配置 API,则回退到简单关键词判断
-        keywords = ["ppt", "幻灯片", "演示", "slide", "presentation", "制作", "生成", "帮我做", "做一个", "介绍", "讲解", "分析"]
-        return any(kw in instruction.lower() for kw in keywords)
-
-    # 0. 快速预判断：如果是纯问候语，直接返回 False，不需要问 LLM
-    greetings = ["你好", "您好", "hi", "hello", "嗨", "在吗", "早安", "晚安", "早上好", "晚上好"]
-    cleaned_instruction = instruction.lower().strip().replace("！", "").replace("!", "")
-    if cleaned_instruction in greetings:
-        logger.info(f"Intent check: '{instruction}' identified as greeting, skipping LLM.")
-        return False
-
-    try:
-        # 1. 强制 system prompt 简单粗暴，防止废话
-        prompt = f"""你是一个 PPT 制作助手的意图识别模块。判断用户输入是否需要**立即生成 PPT**。
-
-用户输入：{instruction}
-
-**核心规则**：
-- 必须包含**具体主题**（如"包含AI"、"关于华为"）才算PPT需求。
-- 询问功能、问候、闲聊、或者"你会做什么"统统不算。
-
-请只回答一个字："是" 或 "否"。"""
-
-        response = await call_llm_api([
-            {"role": "system", "content": "只回答'是'或'否'。不要输出任何思考过程！不要输出标点符号！"},
-            {"role": "user", "content": prompt}
-        ])
-
-        # 2. 清理响应内容（移除 <think> 标签和多余空格）
-        import re
-        clean_result = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
-        # 移除可能的 markdown 标记
-        clean_result = clean_result.replace("**", "").replace("`", "").replace('"', "").replace("'", "")
-        
-        # 3. 严格判断
-        # 只有当结果明确是 "是" 或 "yes" 时才返回 True
-        # 避免 "是否"、"是不是" 等词其中的 "是" 导致误判
-        is_ppt_request = clean_result == "是" or clean_result.lower() == "yes"
-        
-        logger.info(f"Intent check raw: {repr(response)}")
-        logger.info(f"Intent check clean: {repr(clean_result)} -> {is_ppt_request}")
-        
-        return is_ppt_request
-
-    except Exception as e:
-        logger.error(f"Intent check failed: {e}, falling back to keyword matching")
-        # 降级策略：关键词匹配，但要排除询问词
-        keywords = ["ppt", "幻灯片", "演示", "slide", "presentation", "制作", "生成", "帮我做", "做一个", "介绍", "讲解", "分析"]
-        negative_keywords = ["什么", "怎么", "如何", "功能", "能力", "会"]
-        
-        has_keyword = any(kw in instruction.lower() for kw in keywords)
-        has_negative = any(nkw in instruction.lower() for nkw in negative_keywords)
-        
-        # 如果有关键词，且没有明显的疑问词，才认为是PPT需求
-        return has_keyword and not has_negative
-
-
-async def analyze_user_intent_for_paused_session(
-    user_message: str, 
-    current_topic: str,
-    current_stage: str,
-    supplement_data: dict = None
-) -> dict:
-    """
-    分析暂停后用户发送的消息，判断用户意图
-    
-    返回:
-    - action: "restart" | "adjust" | "resume"
-    - new_topic: 如果是 restart 或 adjust，返回新主题
-    - adjustment: 如果是 adjust，返回调整说明
-    """
-    logger.info(f"Analyzing user intent for paused session: {user_message[:50]}...")
-    
-    # 快速判断明确的继续意图
-    continue_keywords = ["继续", "恢复", "接着", "go on", "continue", "resume", "没问题", "好的继续", "确定"]
-    if any(kw in user_message.lower() for kw in continue_keywords) and len(user_message) < 20:
-        return {"action": "resume", "new_topic": current_topic}
-    
-    # 快速判断明确的重新开始意图
-    restart_keywords = ["换个主题", "重新开始", "换一个", "不要这个", "改成", "算了", "从头开始"]
-    if any(kw in user_message.lower() for kw in restart_keywords):
-        # 提取新主题
-        new_topic = user_message
-        for kw in restart_keywords:
-            new_topic = new_topic.replace(kw, "").strip()
-        if not new_topic or len(new_topic) < 3:
-            new_topic = None
-        return {"action": "restart", "new_topic": new_topic}
-    
-    # 使用 LLM 判断复杂意图
-    try:
-        prompt = f"""你是一个PPT制作助手的意图分析模块。用户之前正在制作一份关于"{current_topic}"的PPT，目前处于{current_stage}阶段，但任务被暂停了。
-
-用户现在发送了新消息："{user_message}"
-
-请分析用户的意图，返回JSON格式：
-
-如果用户想**完全更换主题**（制作一个全新的PPT）：
-{{"action": "restart", "new_topic": "新主题内容"}}
-
-如果用户想**调整当前主题**（深入某个方向、调整侧重点等，但还是这个主题）：
-{{"action": "adjust", "new_topic": "调整后的主题", "adjustment": "调整说明"}}
-
-如果用户想**继续执行**（无需修改，继续之前的任务）：
-{{"action": "resume", "new_topic": "{current_topic}"}}
-
-请只输出JSON，不要有其他内容。"""
-
-        response = await call_llm_api([
-            {"role": "system", "content": "你是一个意图分析助手，善于理解用户在对话上下文中的真实意图。请只输出JSON格式的结果。"},
-            {"role": "user", "content": prompt}
-        ])
-        
-        response = clean_json_response(response)
-        result = json.loads(response)
-        logger.info(f"LLM intent analysis result: {result}")
-        return result
-        
-    except Exception as e:
-        logger.error(f"Intent analysis failed: {e}, defaulting to resume")
-        return {"action": "resume", "new_topic": current_topic}
-
-
-async def generate_supplement_info_with_llm(topic: str) -> dict:
-    """使用 LLM 分析用户意图，动态生成补充信息选项"""
-    logger.info(f"Using LLM to analyze topic: {topic}")
-    
-    prompt = f"""分析用户的PPT制作需求，生成补充信息选项。
-
-用户输入：{topic}
-
-请根据用户输入的主题，生成以下内容（JSON格式）：
-1. 分析用户可能的目标受众（4个选项）
-2. 分析PPT可能需要的内容模块（6个选项）
-3. 分析适合的设计风格（4个选项）
-4. 生成一个引导用户补充重点内容的问题
-
-请严格按照以下JSON格式输出：
+输出 JSON Schema：
 {{
-    "topic": "用户主题的简洁描述",
-    "audienceQuestion": "这份PPT的目标受众是？",
-    "audienceOptions": ["选项1", "选项2", "选项3", "选项4"],
-    "modulesQuestion": "PPT中需要包含哪些内容模块？",
-    "modulesOptions": ["模块1", "模块2", "模块3", "模块4", "模块5", "模块6"],
-    "styleQuestion": "你期望的PPT设计风格是？",
-    "styleOptions": ["风格1", "风格2", "风格3", "风格4"],
-    "emphasisQuestion": "是否有特定内容需要重点突出？",
-    "emphasisPlaceholder": "例如：具体的提示内容"
+  "coreRequirement": "一句话概括任务目标",
+  "thinkingNarrative": "2-4句思考过程，说明你如何理解需求、先查什么、为什么这么查",
+  "problemAnalysis": {{"title": "核心问题识别", "items": ["问题1", "问题2", "..."]}},
+  "informationDimensions": {{"title": "信息需求维度", "items": ["维度1", "维度2", "..."]}},
+  "searchStrategy": {{"title": "搜索策略", "items": ["策略1", "策略2", "..."]}},
+  "recommendedSearchQueries": ["搜索词1", "搜索词2", "..."],
+  "outlineDirectives": ["大纲执行约束1", "..."],
+  "designDirectives": ["设计执行约束1", "..."],
+  "steps": [
+    {{"text": "步骤1（必须可执行且可交付）"}},
+    {{"text": "步骤2"}},
+    {{"text": "步骤3"}},
+    {{"text": "步骤4"}},
+    {{"text": "步骤5"}}
+  ]
 }}
 
-只输出JSON，不要有其他内容。"""
+规则：
+1. 步骤必须体现“先分析再执行”，不能泛化成空话。
+2. 若“是否需要联网搜索=否”，recommendedSearchQueries 返回空数组，searchStrategy 聚焦“已有资料校验与补证”。
+3. 步骤数 5-7，按真实执行顺序写。
+4. 不要输出 markdown，不要解释，只输出 JSON。"""
 
-    try:
-        response = await call_llm_api([
-            {"role": "system", "content": "你是一个专业的PPT制作助手，擅长分析用户需求并提供合适的选项。请只输出JSON格式的结果。"},
-            {"role": "user", "content": prompt}
-        ])
-        
-        # 解析 JSON
-        response = clean_json_response(response or "")
-        if not response.strip():
-            raise ValueError("Empty response from LLM")
-        try:
-            result = json.loads(response)
-        except json.JSONDecodeError:
-            # 容错：尝试从文本中提取 JSON
-            start = response.find("{")
-            end = response.rfind("}")
-            if start != -1 and end != -1 and end > start:
-                result = json.loads(response[start:end + 1])
-            else:
-                raise
-        
-        # 清理可能的思维链痕迹
-        if isinstance(result, dict):
-            raw_topic = result.get("topic")
-            if isinstance(raw_topic, str):
-                result["topic"] = _strip_think_tags(raw_topic) or raw_topic
-
-        # 添加页数选项
-        result["numPagesQuestion"] = "您期望的PPT页数范围是？"
-        result["numPagesOptions"] = ["8-10页", "11-15页", "16-20页", "21-25页"]
-        logger.info(f"LLM generated supplement info: {result}")
-        return result
-        
-    except Exception as e:
-        logger.warning(f"Failed to generate supplement info with LLM: {e}")
-        # 回退到基础选项
-        return {
-            "topic": topic,
-            "audienceQuestion": "这份PPT的目标受众是？",
-            "audienceOptions": ["专业人士", "普通公众", "学生群体", "企业客户"],
-            "modulesQuestion": "PPT中需要包含哪些内容模块？",
-            "modulesOptions": ["背景介绍", "核心内容", "案例分析", "数据展示", "总结建议", "Q&A"],
-            "styleQuestion": "你期望的PPT设计风格是？",
-            "styleOptions": ["简约现代", "专业商务", "创意设计", "学术风格"],
-            "numPagesQuestion": "您期望的PPT页数范围是？",
-            "numPagesOptions": ["8-10页", "11-15页", "16-20页", "21-25页"],
-            "emphasisQuestion": "是否有特定内容需要重点突出？",
-            "emphasisPlaceholder": "例如：某个关键点、特定数据、核心结论等"
-        }
-
-
-async def stream_task_plan_with_llm(topic: str, supplement_data: dict) -> AsyncGenerator[Tuple[str, Optional[dict]], None]:
-    """流式生成任务规划，返回 (文本块, 完整数据或None)"""
-    logger.info(f"Streaming task plan for: {topic}")
-
-    audience = supplement_data.get("audience", "专业人士")
-    modules = supplement_data.get("modules", [])
-    style = supplement_data.get("style", "简约现代")
-    keywords = supplement_data.get("keywords", "")
-
-    file_context = supplement_data.get("file_context", "")
-    search_mode = str(supplement_data.get("search_mode", "auto")).strip().lower()
-    if search_mode not in ("auto", "on", "off"):
-        search_mode = "auto"
-
-    # 根据是否有文件内容生成不同的提示
-    if file_context:
-        prompt = f"""用户提供了上传的文件内容，要求基于文件制作关于"{topic}"的PPT。请分析文件内容并生成详细的任务执行规划。
-
-文件内容上下文：
-{file_context[:3000]}... (已截断)
-
-目标受众：{audience}
-内容模块：{', '.join(modules) if modules else '根据文件内容规划'}
-设计风格：{style}
-重点内容：{keywords if keywords else '无特别要求'}
-
-请按以下格式分析（使用纯文本，不要使用JSON）：
-
-用户要求基于文件制作"{topic}"的PPT，我需要分析文件并规划：
-
-1. 核心内容识别：
-• [分析文件的主题]
-• [提取文件中的关键信息]
-• [确定PPT的核心逻辑]
-
-2. 信息提取维度：
-• 按照文件结构提取章节
-• 整理关键数据和结论
-• 提炼核心观点
-• 梳理案例或证明材料
-
-3. 执行策略：
-• **直接使用提供的文件内容作为主要来源**
-• 无需进行外部搜索（除非文件内容严重缺失）
-• 重点是对文件内容进行结构化整理和可视化呈现
-
-4. 结构规划：
-• 基于文件目录或逻辑生成PPT大纲
-• 确保覆盖文件中的所有关键点
-
-现在开始执行规划。
-
-请根据文件内容和主题"{topic}"，生成针对性的分析内容，保持上述格式。"""
-    else:
-        if search_mode == "off":
-            prompt = f"""用户询问"{topic}"，当前设置为不联网搜索，请基于已知信息生成详细的任务执行规划。
-
-目标受众：{audience}
-内容模块：{', '.join(modules) if modules else '待定'}
-设计风格：{style}
-重点内容：{keywords if keywords else '无特别要求'}
-
-请按以下格式分析（使用纯文本，不要使用JSON）：
-
-用户询问"{topic}"，我需要分析这个请求：
-
-1. 核心问题识别：
-• [分析这个主题是什么]
-• [用户需要了解什么信息]
-• [可能涉及的相关领域]
-
-2. 信息整理维度：
-• 基本定义和功能定位
-• 主要特点和核心功能
-• 技术特点和创新点
-• 应用场景和目标用户
-• 发展背景和所属机构
-• 市场表现和用户评价
-
-3. 资料整理策略：
-• 不使用联网搜索
-• 基于用户输入与已有常识进行梳理
-• 如用户补充资料，优先以用户资料为准
-
-4. 质量校验：
-• 避免编造具体数据或来源
-• 对缺失信息使用占位或建议补充
-
-请根据用户的具体主题"{topic}"，生成针对性的分析内容，保持上述格式。"""
-        else:
-            prompt = f"""用户询问"{topic}"，请分析这个请求并生成详细的任务执行规划。
-
-目标受众：{audience}
-内容模块：{', '.join(modules) if modules else '待定'}
-设计风格：{style}
-重点内容：{keywords if keywords else '无特别要求'}
-
-请按以下格式分析（使用纯文本，不要使用JSON）：
-
-用户询问"{topic}"，我需要分析这个请求：
-
-1. 核心问题识别：
-• [分析这个主题是什么]
-• [用户需要了解什么信息]
-• [可能涉及的相关领域]
-
-2. 信息收集维度：
-• 基本定义和功能定位
-• 主要特点和核心功能
-• 技术特点和创新点
-• 应用场景和目标用户
-• 发展背景和所属机构
-• 市场表现和用户评价
-
-3. 搜索策略：
-• 首先搜索"{topic}"了解基本信息
-• 搜索可能相关的关键词
-• 可能需要访问官网或权威媒体了解详细信息
-• 收集最新动态和用户反馈
-
-4. 时间范围：
-• 由于这是一个产品/主题介绍，需要了解最新信息
-• 不应该限制搜索时间范围，以确保获取全面信息
-
-现在开始执行搜索计划。
-
-请根据用户的具体主题"{topic}"，生成针对性的分析内容，保持上述格式。"""
-
-    full_text = ""
-    try:
-        async for chunk in call_llm_api_stream([
-            {"role": "system", "content": "你是一个专业的PPT制作助手，擅长分析用户需求并规划任务步骤。请按照用户要求的格式输出分析结果。"},
-            {"role": "user", "content": prompt}
-        ]):
-            full_text += chunk
-            yield (chunk, None)  # 流式输出文本块
-
-        # 最后解析并返回结构化数据（步骤由模型生成）
-        steps = await generate_task_steps_with_llm(topic, supplement_data, full_text)
-        task_plan_data = parse_task_plan_text(full_text, topic, supplement_data, steps=steps)
-        yield ("", task_plan_data)  # 最后返回完整数据
-
-    except Exception as e:
-        logger.error(f"Failed to stream task plan: {e}")
-        # 回退到基础规划
-        fallback_data = {
-            "coreRequirement": f"制作一份关于「{topic}」的PPT，面向{audience}，采用{style}风格",
-            "streamContent": f'用户询问「{topic}」，我需要分析这个请求：\n\n1. 核心问题识别：\n• 「{topic}」是需要分析的主题\n• 用户需要了解这个主题的详细信息\n• 可能需要收集相关数据和案例',
-            "steps": build_task_steps(supplement_data),
-        }
-        yield ("", fallback_data)
-
-
-def parse_task_plan_text(text: str, topic: str, supplement_data: dict, steps: Optional[list] = None) -> dict:
-    """将流式文本解析为结构化数据"""
-    audience = supplement_data.get("audience", "专业人士")
-    style = supplement_data.get("style", "简约现代")
-
-    return {
-        "coreRequirement": f"制作一份关于「{topic}」的PPT，面向{audience}，采用{style}风格",
-        "streamContent": text,  # 保存流式内容
-        "steps": steps or build_task_steps(supplement_data),
+    fallback = {
+        "coreRequirement": f"围绕「{normalized_topic or topic}」构建一份可直接交付的 {num_pages} 页演示稿，确保信息准确且结构清晰。",
+        "thinkingNarrative": (
+            f"用户想了解「{normalized_topic or topic}」，先要确认它的准确定义与应用边界。"
+            "我会先做基础检索建立事实底座，再按功能、场景、使用流程与价值维度补齐证据，"
+            "最后把信息压缩成适合演示的页面结构。"
+        ),
+        "problemAnalysis": {
+            "title": "核心问题识别",
+            "items": [
+                "需要明确受众关注点与决策场景",
+                "需要确保关键结论有依据支撑",
+                "需要控制页数与信息密度平衡",
+            ],
+        },
+        "informationDimensions": {
+            "title": "信息需求维度",
+            "items": [
+                "背景与现状",
+                "核心方案/能力",
+                "数据或案例证据",
+                "落地路径与价值总结",
+            ],
+        },
+        "searchStrategy": {
+            "title": "搜索策略",
+            "items": [
+                "优先检索权威来源并交叉验证",
+                "按模块补齐数据、案例和定义口径",
+                "提炼可直接入页的事实与结论",
+            ] if should_search else [
+                "以用户提供资料为主线拆分章节证据",
+                "补齐资料缺口并标注不确定信息",
+                "统一术语与结论口径，避免歧义",
+            ],
+        },
+        "recommendedSearchQueries": ([normalized_topic or topic] if should_search else []),
+        "outlineDirectives": [
+            "目录与正文一一映射，避免跳页",
+            "重点页必须包含结论+证据+行动建议",
+            f"总页数严格控制在 {num_pages} 页",
+        ],
+        "designDirectives": [
+            "同一章节保持统一版式与视觉层级",
+            "每页仅一个主结论，避免信息堆叠",
+            "图文比例按信息密度动态调整",
+        ],
     }
 
+    try:
+        raw = await call_llm_api([
+            {"role": "system", "content": "你是任务规划器，只输出合法 JSON。"},
+            {"role": "user", "content": prompt},
+        ])
+        matched = re.search(r"\{[\s\S]*\}", _clean_json_text(raw or ""))
+        if matched:
+            parsed = json.loads(matched.group(0))
+            if isinstance(parsed, dict):
+                fallback.update(parsed)
+    except Exception as e:
+        logger.warning(f"Failed to generate execution plan with LLM: {e}")
 
-async def stream_outline_generation(topic: str, search_results: list, deep_thinking_content: str, supplement_data: dict) -> AsyncGenerator[str, None]:
+    problem_analysis = _ensure_dict(fallback.get("problemAnalysis"))
+    info_dimensions = _ensure_dict(fallback.get("informationDimensions"))
+    search_strategy = _ensure_dict(fallback.get("searchStrategy"))
+
+    fallback["problemAnalysis"] = {
+        "title": str(problem_analysis.get("title") or "核心问题识别")[:30],
+        "items": _normalize_string_list(problem_analysis.get("items"), max_items=6),
+    }
+    fallback["informationDimensions"] = {
+        "title": str(info_dimensions.get("title") or "信息需求维度")[:30],
+        "items": _normalize_string_list(info_dimensions.get("items"), max_items=6),
+    }
+    fallback["searchStrategy"] = {
+        "title": str(search_strategy.get("title") or "搜索策略")[:30],
+        "items": _normalize_string_list(search_strategy.get("items"), max_items=6),
+    }
+    fallback["recommendedSearchQueries"] = _normalize_string_list(
+        fallback.get("recommendedSearchQueries"),
+        max_items=8,
+    ) if should_search else []
+    fallback["outlineDirectives"] = _normalize_string_list(fallback.get("outlineDirectives"), max_items=6)
+    fallback["designDirectives"] = _normalize_string_list(fallback.get("designDirectives"), max_items=6)
+    fallback["coreRequirement"] = str(fallback.get("coreRequirement") or "").strip()[:240]
+    fallback["thinkingNarrative"] = str(fallback.get("thinkingNarrative") or "").strip()[:600]
+    fallback["shouldSearch"] = should_search
+    fallback["steps"] = build_task_steps(supplement_data, fallback)
+    fallback["plan_content"] = _build_plan_markdown(fallback)
+    fallback["streamContent"] = ""
+
+    return fallback
+
+
+async def stream_outline_generation(
+    topic: str,
+    search_results: list,
+    deep_thinking_content: str,
+    supplement_data: dict,
+    execution_plan: Optional[Dict] = None,
+) -> AsyncGenerator[str, None]:
     """流式生成 PPT 大纲目录"""
     logger.info(f"Starting outline generation for: {topic}")
 
@@ -536,38 +337,37 @@ async def stream_outline_generation(topic: str, search_results: list, deep_think
     modules = supplement_data.get("modules", [])
     style = supplement_data.get("style", "简约现代")
     num_pages_range = supplement_data.get("num_pages", "8-10页")
-
-    # 将页数范围转换为具体数字（取中间值）
-    if isinstance(num_pages_range, str):
-        if "8-10" in num_pages_range:
-            num_pages = 9
-        elif "11-15" in num_pages_range:
-            num_pages = 13
-        elif "16-20" in num_pages_range:
-            num_pages = 18
-        elif "21-25" in num_pages_range:
-            num_pages = 23
-        else:
-            num_pages = 10
-    else:
-        num_pages = num_pages_range
+    num_pages = _resolve_num_pages(num_pages_range)
 
     file_context = supplement_data.get("file_context", "")
-    
+    file_excerpt = build_prompt_context(file_context)
+    plan = execution_plan or {}
+    plan_core = str(plan.get("coreRequirement") or "").strip()
+    plan_dimensions = ((plan.get("informationDimensions") or {}).get("items") or [])[:6]
+    plan_outline_directives = (plan.get("outlineDirectives") or [])[:6]
+    plan_design_directives = (plan.get("designDirectives") or [])[:6]
+
+    plan_str = ""
+    if plan_core or plan_dimensions or plan_outline_directives or plan_design_directives:
+        plan_str = (
+            "\n执行规划约束（必须遵循）：\n"
+            f"- 核心目标：{plan_core or '无'}\n"
+            f"- 信息维度：{'; '.join([str(x) for x in plan_dimensions]) if plan_dimensions else '无'}\n"
+            f"- 大纲约束：{'; '.join([str(x) for x in plan_outline_directives]) if plan_outline_directives else '无'}\n"
+            f"- 设计约束：{'; '.join([str(x) for x in plan_design_directives]) if plan_design_directives else '无'}\n"
+        )
+
     # 构造上下文内容
-    context_str = ""
-    if file_context:
-        context_str = f"""
-文件内容（主要依据）：
-{file_context[:5000]}
-"""
+    if file_excerpt:
+        context_str = f"\n文件内容（主要依据）：\n{file_excerpt}\n{plan_str}"
     else:
         context_str = f"""
 搜索结果摘要：
 {results_summary}
 
 深度分析内容：
-{deep_thinking_content[:1500] if deep_thinking_content else '无'}
+{deep_thinking_content  if deep_thinking_content else '无'}
+{plan_str}
 """
 
     prompt = f"""基于以下信息，为「{topic}」生成PPT大纲目录。
@@ -579,7 +379,7 @@ async def stream_outline_generation(topic: str, search_results: list, deep_think
 
 {context_str}
 
-请生成一份**内容充实、结构合理**的PPT大纲，格式如下：
+请生成一份**内容详细、覆盖全面、结构合理**的PPT大纲，格式如下：
 
 # PPT大纲：[根据内容生成的专业标题]
 
@@ -601,7 +401,13 @@ async def stream_outline_generation(topic: str, search_results: list, deep_think
 - 核心价值回顾
 - 未来发展方向
 
-**重要要求**：页数必须严格为 {num_pages} 页！"""
+**重要要求**：
+1. 页数必须严格为 {num_pages} 页！
+2. **必须覆盖文档中的所有章节/关键点，不得遗漏**
+3. 若文档存在明确目录/章节标题，需逐一映射到大纲页面
+4. 重点页面需包含更详细的要点与数据/结论（如文档中有）
+5. **每个内容页至少 3 条要点，重点页建议 4-6 条**
+6. 若给出了“执行规划约束”，请优先按约束组织页面结构与重点分配。"""
 
     try:
         async for chunk in call_llm_api_stream([
@@ -611,7 +417,6 @@ async def stream_outline_generation(topic: str, search_results: list, deep_think
             yield chunk
     except Exception as e:
         logger.error(f"Outline generation error: {e}")
-        # 回退到简单大纲
         fallback = f"""# PPT大纲：{topic}
 
 ## 第1页：封面

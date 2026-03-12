@@ -37,7 +37,7 @@ services:
 
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5435:5432"
+      - "5432:5432"
     networks:
       - pptagent-network
     restart: unless-stopped

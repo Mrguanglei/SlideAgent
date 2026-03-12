@@ -203,7 +203,8 @@ export async function getPPTProject(projectId: number): Promise<PPTProject> {
 export async function updateSlide(
   slideId: number,
   htmlContent: string,
-  pageTitle?: string
+  pageTitle?: string,
+  versionId?: number
 ): Promise<PPTSlide> {
   const response = await fetch(`${API_BASE}/ppt/slides/${slideId}`, {
     method: "PATCH",
@@ -211,6 +212,7 @@ export async function updateSlide(
     body: JSON.stringify({
       html_content: htmlContent,
       page_title: pageTitle,
+      version_id: versionId,
     }),
   });
   if (!response.ok) {
@@ -335,7 +337,7 @@ export async function createShare(request: ShareRequest): Promise<ShareResponse>
 /**
  * 获取分享数据
  */
-export async function getShareData(shareId: string): Promise<ShareData> {
+export async function getShareData(shareId: string): Promise<any> {
   const response = await fetch(`${API_BASE}/ppt/share/${shareId}`);
   if (!response.ok) {
     throw new Error("Share not found or expired");

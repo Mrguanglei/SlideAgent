@@ -33,9 +33,9 @@ This project is still under active development and gradually improving:
 Welcome to try it out and provide feedback!
 
 ## 🎉 News
-
-- **\[2026/02\]** Add The Function of Online Search
-- **\[2026/01\]** "See-What-You-Get" PPT Export Function
+- **\[2026/03\]** Major version update, architecture reorganization.
+- **\[2026/02\]** Add The Function of Online Search.
+- **\[2026/01\]** "See-What-You-Get" PPT Export Function.
 
 ## ✨ Highlights
 
@@ -47,17 +47,15 @@ Welcome to try it out and provide feedback!
 - **PPTX Export Service** — Dedicated export_tool service converts HTML slides to editable PPTX
 
 ## ✅ Current Status
-
+- [x] **Conversational Editing** — Keep refining slides via dialogue
+- [x] **Multi-version Management** — Save, compare, and rollback versions
 - [x] **Content Editing** — Edit slide text directly in the preview
 - [x] **Online Preview** — Real-time PPT preview in the browser
 - [x] **Export** — PDF / HTML / PPTX export (PPTX styles may be lost; improving)
 - [x] **Task Status** — Global persistence of agent task status
 
 ## 🧭 Roadmap
-
-- [ ] **Conversational Editing** — Keep refining slides via dialogue
 - [ ] **Database Search Tool** — Call knowledge base tools directly
-- [ ] **Multi-version Management** — Save, compare, and rollback versions
 
 ## 🚀 Quick Start
 

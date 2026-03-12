@@ -6,11 +6,20 @@ export interface Message {
   role: "user" | "assistant";
   content: string;
   timestamp: number;
+  attachments?: MessageAttachment[];
   toolCalls?: ToolCall[];
   tool_calls?: any[]; // 为了兼容后端返回的原始数据
   isDeepThinking?: boolean;
   deepThinkingContent?: string;
   streaming?: boolean; // 是否正在流式输出
+}
+
+export interface MessageAttachment {
+  id?: string | number;
+  filename: string;
+  file_path?: string;
+  file_size?: number;
+  content_type?: string;
 }
 
 // 工具调用类型
@@ -23,6 +32,8 @@ export interface ToolCall {
     | "supplement_info"
     | "ppt_outline"
     | "ppt_generate"
+    | "ppt_edit"
+    | "ppt_remove"
     | "deep_thinking";
   name: string;
   status: "pending" | "confirmed" | "auto_execute" | "running" | "completed" | "error";
@@ -64,6 +75,7 @@ export interface ToolCallData {
 
 // 任务规划
 export interface TaskPlan {
+  thinkingNarrative?: string;
   coreRequirement?: string;
   problemAnalysis?: {
     title?: string;
@@ -141,6 +153,7 @@ export interface PPTVersion {
   project_id?: number;
   version_number: number;
   version_name?: string;
+  parent_version_id?: number | null; // 非 null 表示这是手动编辑子版本
   created_at: string;
   slide_count?: number;
   slides?: PPTSlide[];

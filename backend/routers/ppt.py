@@ -26,6 +26,7 @@ class SlideUpdate(BaseModel):
     """更新幻灯片请求"""
     html_content: str
     page_title: Optional[str] = None
+    version_id: Optional[int] = None  # 所属版本 ID，用于创建原始子版本快照
 
 
 class PPTVersionCreate(BaseModel):
@@ -107,6 +108,7 @@ async def get_ppt_project(
             "id": v.id,
             "version_number": v.version_number,
             "version_name": v.version_name,
+            "parent_version_id": v.parent_version_id,
             "created_at": v.created_at.isoformat(),
             "slide_count": len(slides),
             "slides": [
@@ -158,7 +160,34 @@ async def update_slide(
     request: SlideUpdate,
     db: AsyncSession = Depends(get_db)
 ):
-    """更新单个幻灯片（编辑功能）"""
+    """更新单个幻灯片（编辑功能）。首次编辑时自动创建原始子版本快照。"""
+    # 如果传入了 version_id，检查该版本是否已有原始子版本快照
+    if request.version_id:
+        from sqlalchemy import select
+        from database.models import PPTVersion
+        result = await db.execute(
+            select(PPTVersion).where(PPTVersion.parent_version_id == request.version_id)
+        )
+        existing_sub = result.scalars().first()
+        if not existing_sub:
+            # 首次编辑：创建原始子版本（复制当前版本所有 slides）
+            parent_version = await crud.get_ppt_version(db, request.version_id)
+            if parent_version:
+                parent_slides = await crud.get_ppt_slides(db, request.version_id)
+                sub_version = await crud.create_ppt_sub_version(
+                    db,
+                    project_id=parent_version.project_id,
+                    parent_version_id=request.version_id,
+                    version_number=parent_version.version_number,
+                    version_name=f"V{parent_version.version_number} 原始",
+                )
+                slides_data = [
+                    {"page_number": s.page_number, "html_content": s.html_content, "page_title": getattr(s, "page_title", None)}
+                    for s in sorted(parent_slides, key=lambda x: x.page_number)
+                ]
+                await crud.create_ppt_slides_batch(db, sub_version.id, slides_data)
+                await db.commit()
+
     slide = await crud.update_ppt_slide(
         db,
         slide_id,
@@ -167,7 +196,7 @@ async def update_slide(
     )
     if not slide:
         raise HTTPException(status_code=404, detail="Slide not found")
-    
+
     return {
         "id": slide.id,
         "page_number": slide.page_number,
