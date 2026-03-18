@@ -185,21 +185,39 @@ export default function MessageItem({
             {message.content && (
               <p className="leading-relaxed whitespace-pre-wrap text-foreground">{message.content}</p>
             )}
-            {message.attachments && message.attachments.length > 0 && (
-              <div className="mt-3 flex flex-col gap-2">
-                {message.attachments.map((att, idx) => {
+            {(message.template || (message.attachments && message.attachments.length > 0)) && (
+              <div className="mt-3 flex flex-wrap gap-2 max-w-[620px]">
+                {message.template && (
+                  <div className="flex min-w-[220px] max-w-[300px] items-center gap-3 rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 shadow-sm">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/12 text-primary shadow-sm">
+                      <FileText className="h-6 w-6" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-foreground">
+                        模板：{message.template.title}
+                      </div>
+                      {message.template.subtitle && (
+                        <div className="max-w-[180px] truncate text-xs text-muted-foreground">
+                          {message.template.subtitle}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {message.attachments?.map((att, idx) => {
                   const ext = getFileExt(att.filename || "");
                   const sizeLabel = formatFileSize(att.file_size);
                   return (
                     <div
                       key={`${att.filename}-${idx}`}
-                      className="flex items-center gap-3 rounded-2xl border border-border/60 bg-muted/60 px-4 py-3 shadow-sm max-w-[420px]"
+                      className="flex min-w-[220px] max-w-[300px] items-center gap-3 rounded-2xl border border-border/60 bg-muted/60 px-4 py-3 shadow-sm"
                     >
                       <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-white shadow-sm">
                         <FileText className="h-6 w-6" />
                       </div>
                       <div className="min-w-0">
-                        <div className="text-sm font-medium text-foreground truncate max-w-[280px]">
+                        <div className="text-sm font-medium text-foreground truncate max-w-[180px]">
                           {att.filename}
                         </div>
                         <div className="text-xs text-muted-foreground">
@@ -222,7 +240,7 @@ export default function MessageItem({
               <div className="w-12 h-12 flex items-center justify-center shrink-0">
                 <AIAvatar isActive={isLoading} />
               </div>
-              <span className="text-base font-medium text-foreground leading-none">SlideAgent</span>
+              <span className="text-base font-medium text-foreground leading-none">BotSlide</span>
             </div>
           )}
 

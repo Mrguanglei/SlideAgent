@@ -180,7 +180,8 @@ async def generate_execution_plan(topic: str, supplement_data: dict) -> Dict:
     normalized_topic = extract_core_topic(str(supplement_data.get("topic") or "").strip() or (topic or ""))
     audience = supplement_data.get("audience", "")
     modules = supplement_data.get("modules", [])
-    style = supplement_data.get("style", "")
+    has_template = bool(str(supplement_data.get("selected_template") or "").strip())
+    style = "" if has_template else supplement_data.get("style", "")
     emphasis = supplement_data.get("keywords") or supplement_data.get("emphasis") or ""
     file_context = supplement_data.get("file_context", "")
     file_excerpt = build_prompt_context(file_context, max_chars=1200)
@@ -335,7 +336,8 @@ async def stream_outline_generation(
     # 获取补充信息
     audience = supplement_data.get("audience", "专业人士")
     modules = supplement_data.get("modules", [])
-    style = supplement_data.get("style", "简约现代")
+    has_template = bool(str(supplement_data.get("selected_template") or "").strip())
+    style = "" if has_template else supplement_data.get("style", "简约现代")
     num_pages_range = supplement_data.get("num_pages", "8-10页")
     num_pages = _resolve_num_pages(num_pages_range)
 
@@ -374,7 +376,7 @@ async def stream_outline_generation(
 
 目标受众：{audience}
 内容模块：{', '.join(modules) if modules else '自动规划'}
-设计风格：{style}
+设计风格：{style or "按内容自然组织（模板仅影响最终视觉样式，不影响内容策划）"}
 **必须生成的页数：{num_pages}页（严格遵守，不能多也不能少）**
 
 {context_str}

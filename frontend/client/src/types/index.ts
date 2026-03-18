@@ -6,12 +6,19 @@ export interface Message {
   role: "user" | "assistant";
   content: string;
   timestamp: number;
+  template?: MessageTemplate;
   attachments?: MessageAttachment[];
   toolCalls?: ToolCall[];
   tool_calls?: any[]; // 为了兼容后端返回的原始数据
   isDeepThinking?: boolean;
   deepThinkingContent?: string;
   streaming?: boolean; // 是否正在流式输出
+}
+
+export interface MessageTemplate {
+  id: number;
+  title: string;
+  subtitle?: string;
 }
 
 export interface MessageAttachment {

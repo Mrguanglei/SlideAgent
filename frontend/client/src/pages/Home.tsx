@@ -32,10 +32,11 @@ import type {
   PPTProject,
   Conversation,
   TemplateCategory,
+  Template,
 } from "@/types";
 
 // API
-import { uploadFile, type UploadResponse, type DocumentResponse } from "@/lib/api";
+import { uploadFile, parseUploadedFile, type UploadResponse, type DocumentResponse } from "@/lib/api";
 
 const pickGreeting = () => {
   const now = new Date();
@@ -136,6 +137,7 @@ export default function Home() {
   const [greeting, setGreeting] = useState(() => pickGreeting());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<TemplateCategory>("全部");
+  const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
   const [isPptMode] = useState(true);
 
   // ==================== 聊天状态 ====================
@@ -149,6 +151,9 @@ export default function Home() {
   const [showKbSelector, setShowKbSelector] = useState(false);
   const [searchMode, setSearchMode] = useState<"auto" | "on" | "off">("auto");
   const isSearchDisabled = activeAttachments.length > 0;
+  const hasPendingAttachmentProcessing = activeAttachments.some(
+    (file) => file.upload_status === "uploading" || file.parse_status === "parsing"
+  );
 
   // ==================== 对话/会话 ====================
   const [currentConversationId, setCurrentConversationId] = useState<number | null>(null);
@@ -455,15 +460,28 @@ export default function Home() {
 
   // ==================== 发送消息 ====================
   const handleSendMessage = async () => {
-    if (!inputValue.trim() || isLoading) return;
+    if (hasPendingAttachmentProcessing) {
+      toast.info("文件还在上传或解析中，稍等一下再发送");
+      return;
+    }
+    if ((!inputValue.trim() && !selectedTemplate && activeAttachments.length === 0) || isLoading) return;
+
+    const currentTemplate = selectedTemplate;
+    const messageContent = inputValue.trim() || (currentTemplate ? "请基于已选择的模板生成 PPT" : "请根据上传的附件制作 PPT");
 
     const userMessage: Message = {
-      id: `user-${Date.now()}`, role: "user", content: inputValue.trim(), timestamp: Date.now(),
+      id: `user-${Date.now()}`, role: "user", content: messageContent, timestamp: Date.now(),
+      template: currentTemplate ? {
+        id: currentTemplate.id,
+        title: currentTemplate.title,
+        subtitle: currentTemplate.subtitle,
+      } : undefined,
       attachments: activeAttachments.map(att => ({ id: att.id, filename: att.filename, file_path: att.file_path, file_size: att.size, content_type: att.content_type })),
     };
 
     setMessages(prev => [...prev, userMessage]);
     setInputValue("");
+    setSelectedTemplate(null);
     const currentAttachments = activeAttachments;
     setActiveAttachments([]);
     setIsLoading(true);
@@ -483,10 +501,11 @@ export default function Home() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        instruction: userMessage.content,
+        instruction: messageContent,
         session_id: undefined,
         conversation_id: currentConversationId,
         attachments: currentAttachments.length > 0 ? currentAttachments : undefined,
+        template: currentTemplate?.title,
         search_mode: searchMode,
       }),
       signal: abortControllerRef.current.signal,
@@ -687,14 +706,84 @@ export default function Home() {
   };
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      try {
-        const response = await uploadFile(e.target.files[0]);
-        setActiveAttachments(prev => [...prev, response]);
-        toast.success("文件上传成功");
-        setHomePopoverOpen(false); setChatPopoverOpen(false);
-      } catch { toast.error("文件上传失败"); }
-      finally { if (fileInputRef.current) fileInputRef.current.value = ""; }
+    if (e.target.files && e.target.files.length > 0) {
+      const files = Array.from(e.target.files);
+
+      for (const file of files) {
+        const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+        setActiveAttachments(prev => [
+          ...prev,
+          {
+            id: localId,
+            filename: file.name,
+            file_path: "",
+            content_type: file.type || "application/octet-stream",
+            size: file.size,
+            uploadProgress: 0,
+            upload_status: "uploading",
+            parse_status: "pending",
+            parse_message: "文件上传中",
+          },
+        ]);
+
+        try {
+          const uploaded = await uploadFile(file, (progress) => {
+            setActiveAttachments(prev => prev.map(item =>
+              item.id === localId
+                ? {
+                    ...item,
+                    uploadProgress: progress,
+                    upload_status: "uploading",
+                    parse_message: progress >= 100 ? "上传完成，准备解析" : "文件上传中",
+                  }
+                : item
+            ));
+          });
+
+          setActiveAttachments(prev => prev.map(item =>
+            item.id === localId
+              ? {
+                  ...item,
+                  ...uploaded,
+                  uploadProgress: 100,
+                  upload_status: "uploaded",
+                  parse_status: "parsing",
+                  parse_message: "文件解析中",
+                }
+              : item
+          ));
+
+          const parsed = await parseUploadedFile(uploaded.file_path, uploaded.filename);
+
+          setActiveAttachments(prev => prev.map(item =>
+            item.id === localId || item.id === uploaded.id
+              ? {
+                  ...item,
+                  ...uploaded,
+                  uploadProgress: 100,
+                  upload_status: "uploaded",
+                  ...parsed,
+                }
+              : item
+          ));
+
+          if (parsed.parse_status === "completed") {
+            toast.success(`已完成上传和解析：${file.name}`);
+          } else if (parsed.parse_status === "unsupported") {
+            toast.success(`已上传：${file.name}`);
+          } else {
+            toast.error(`解析失败：${file.name}`);
+          }
+        } catch {
+          setActiveAttachments(prev => prev.filter(item => item.id !== localId));
+          toast.error(`文件处理失败：${file.name}`);
+        }
+      }
+
+      setHomePopoverOpen(false);
+      setChatPopoverOpen(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -702,6 +791,9 @@ export default function Home() {
     const newAttachments: UploadResponse[] = docs.map(doc => ({
       id: String(doc.id), filename: doc.display_name || doc.filename, file_path: "",
       content_type: doc.file_type, size: doc.file_size, knowledge_document_id: doc.id,
+      upload_status: "uploaded",
+      parse_status: doc.parse_status as UploadResponse["parse_status"],
+      parse_message: doc.parse_status === "completed" ? "知识库文件已解析完成" : "知识库文件解析中",
     }));
     setActiveAttachments(prev => [...prev, ...newAttachments]);
     setShowKbSelector(false); setHomePopoverOpen(false); setChatPopoverOpen(false);
@@ -766,6 +858,7 @@ export default function Home() {
               activeAttachments={activeAttachments}
               setActiveAttachments={setActiveAttachments}
               isLoading={isLoading}
+              hasPendingAttachmentProcessing={hasPendingAttachmentProcessing}
               searchMode={searchMode}
               setSearchMode={setSearchMode}
               isSearchDisabled={isSearchDisabled}
@@ -773,6 +866,8 @@ export default function Home() {
               setHomePopoverOpen={setHomePopoverOpen}
               selectedCategory={selectedCategory}
               setSelectedCategory={setSelectedCategory}
+              selectedTemplate={selectedTemplate}
+              setSelectedTemplate={setSelectedTemplate}
               onSend={handleSendMessage}
               onOpenKbSelector={() => setShowKbSelector(true)}
               onOpenFileInput={() => fileInputRef.current?.click()}
@@ -791,6 +886,7 @@ export default function Home() {
               messagesEndRef={messagesEndRef}
               activeAttachments={activeAttachments}
               setActiveAttachments={setActiveAttachments}
+              hasPendingAttachmentProcessing={hasPendingAttachmentProcessing}
               searchMode={searchMode}
               setSearchMode={setSearchMode}
               isSearchDisabled={isSearchDisabled}
@@ -901,6 +997,11 @@ export default function Home() {
           onClose={() => setShowShareModal(false)}
           projectId={pptProject.id}
           versionId={pptProject.current_version?.id}
+          viewMode={(() => {
+            const cvId = pptProject.current_version?.id;
+            if (!cvId) return "modified";
+            return snapshotViewingOriginal[cvId] ? "original" : "modified";
+          })()}
           title={pptProject.title}
         />
       )}
@@ -923,7 +1024,7 @@ export default function Home() {
       />
 
       <KnowledgeBaseSelector open={showKbSelector} onOpenChange={setShowKbSelector} onSelect={handleKbSelect} />
-      <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileSelect} />
+      <input type="file" ref={fileInputRef} className="hidden" multiple onChange={handleFileSelect} />
     </div>
   );
 }

@@ -68,6 +68,8 @@ export default function ToolCallCard({
     numPagesOptions?: string[];
     emphasisQuestion?: string;
     emphasisPlaceholder?: string;
+    selectedTemplate?: string;
+    templateLocked?: boolean;
     // Confirmed data fields
     audience?: string;
     modules?: string[];
@@ -184,6 +186,11 @@ export default function ToolCallCard({
                     <p className="text-sm text-muted-foreground">
                       为了保证生成质量，我需要向您确认更多需求细节
                     </p>
+                    {dynamicData.templateLocked && dynamicData.selectedTemplate && (
+                      <div className="rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-muted-foreground">
+                        已选择模板「{dynamicData.selectedTemplate}」，本次将沿用模板风格，因此这里不再展示风格选项。
+                      </div>
+                    )}
 
                     {/* 受众选择 */}
                     {dynamicData.audienceOptions &&

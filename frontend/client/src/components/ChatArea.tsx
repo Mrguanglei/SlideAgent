@@ -129,7 +129,7 @@ export default function ChatArea({
                       <div className="w-12 h-12 flex items-center justify-center shrink-0">
                         <AIAvatar isActive offsetX={AI_AVATAR_OFFSET_X} />
                       </div>
-                      <span className="text-base font-medium text-foreground leading-none">SlideAgent</span>
+                      <span className="text-base font-medium text-foreground leading-none">BotSlide</span>
                     </div>
                     <div className="pl-8">
                       <div className="text-base text-foreground leading-relaxed whitespace-pre-wrap">

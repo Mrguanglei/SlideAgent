@@ -145,18 +145,24 @@ def check_ppt_intent_by_keyword(instruction: str, has_attachments: bool = False)
     return has_keyword and not has_negative
 
 
-def generate_supplement_info(topic: str) -> dict:
+def generate_supplement_info(topic: str, template_name: str = "") -> dict:
     """生成固定模板的补充信息选项（不调用LLM）"""
-    return {
+    has_template = bool(str(template_name or "").strip())
+    result = {
         "topic": topic,
         "audienceQuestion": "这份PPT的目标受众是？",
         "audienceOptions": ["专业人士", "普通公众", "学生群体", "企业客户"],
         "modulesQuestion": "PPT中需要包含哪些内容模块？",
         "modulesOptions": ["背景介绍", "核心内容", "案例分析", "数据展示", "总结建议", "Q&A"],
-        "styleQuestion": "你期望的PPT设计风格是？",
-        "styleOptions": ["简约现代", "专业商务", "创意设计", "学术风格"],
         "numPagesQuestion": "您期望的PPT页数范围是？",
         "numPagesOptions": ["8-10页", "11-15页", "16-20页", "21-25页"],
         "emphasisQuestion": "是否有特定内容需要重点突出？",
         "emphasisPlaceholder": "例如：某个关键点、特定数据、核心结论等",
     }
+    if has_template:
+        result["selectedTemplate"] = template_name
+        result["templateLocked"] = True
+    else:
+        result["styleQuestion"] = "你期望的PPT设计风格是？"
+        result["styleOptions"] = ["简约现代", "专业商务", "创意设计", "学术风格"]
+    return result

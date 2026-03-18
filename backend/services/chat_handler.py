@@ -46,14 +46,29 @@ from services.ppt_generator import (
     parse_num_pages,
     run_slide_design_agent,
     run_slide_edit_agent,
-    replace_image_placeholders,
 )
-from services.resource_inliner import inline_all_resources
-from services.knowledge.document_parser import DocumentParser
+from services.chat_file_service import ensure_chat_file_parsed
+from services.template_presets import apply_template_to_supplement_data
 from database.crud import delete_ppt_slide_by_page
 from database.models import Session as SessionModel
 
 logger = logging.getLogger(__name__)
+_IMG_TAG_PATTERN = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
+_CSS_BG_IMAGE_PATTERN = re.compile(r"background-image\s*:\s*url\([^)]+\)\s*;?", re.IGNORECASE)
+_CSS_BG_WITH_URL_PATTERN = re.compile(r"background\s*:\s*[^;]*url\([^)]+\)[^;]*;?", re.IGNORECASE)
+_IMG_PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*img_\d+\s*\}\}", re.IGNORECASE)
+
+
+def _strip_images_from_html(html: str) -> str:
+    """移除 HTML 中所有图片引用，确保不使用图片资源。"""
+    if not html:
+        return html
+
+    cleaned = _IMG_TAG_PATTERN.sub("", html)
+    cleaned = _CSS_BG_IMAGE_PATTERN.sub("background-image:none;", cleaned)
+    cleaned = _CSS_BG_WITH_URL_PATTERN.sub("background:none;", cleaned)
+    cleaned = _IMG_PLACEHOLDER_PATTERN.sub("", cleaned)
+    return cleaned
 
 async def resolve_instruction_with_context(
     instruction: str,
@@ -178,9 +193,13 @@ async def generate_conversation_title_llm(text: str, max_len: int = 32) -> str:
     return normalize_conversation_title(fallback, max_len=max_len)
 
 
-async def generate_supplement_info_llm(topic: str) -> dict:
+async def generate_supplement_info_llm(topic: str, template_name: str = "") -> dict:
     """用 LLM 根据主题动态生成补充信息表单选项，失败时回退到固定模板"""
     from utils.helpers import generate_supplement_info
+    normalized_template = str(template_name or "").strip()
+    if normalized_template:
+        return generate_supplement_info(topic, template_name=normalized_template)
+
     prompt = f"""你是一个PPT策划专家。用户想制作关于「{topic}」的PPT。
 请根据这个主题，生成最合适的补充信息表单选项，以JSON格式输出：
 
@@ -372,7 +391,7 @@ async def stream_ppt_generation(
 
                             if event_type == "slide_update":
                                 page_number = event["page_number"]
-                                html_content = event["html_content"]
+                                html_content = _strip_images_from_html(event["html_content"])
                                 description = event.get("description", f"第 {page_number} 页已更新")
 
                                 # 更新数据库中对应页面
@@ -502,7 +521,6 @@ async def stream_ppt_generation(
                 "supplement_data": existing_session.supplement_data or {},
                 "execution_plan": (existing_session.supplement_data or {}).get("execution_plan", {}),
                 "conversation_id": existing_session.conversation_id or conversation_id,
-                "image_results": [],
                 "workspace_dir": str(Path(Config.WORKSPACE_BASE) / session_id),
             }
         else:
@@ -519,7 +537,6 @@ async def stream_ppt_generation(
                 "supplement_data": supplement_data or {},
                 "execution_plan": {},
                 "conversation_id": conversation_id,
-                "image_results": [],
                 "workspace_dir": str(Path(Config.WORKSPACE_BASE) / session_id),
             }
     else:
@@ -532,7 +549,6 @@ async def stream_ppt_generation(
             "supplement_data": supplement_data or {},
             "execution_plan": {},
             "conversation_id": conversation_id,
-            "image_results": [],
             "workspace_dir": str(Path(Config.WORKSPACE_BASE) / session_id),
         }
 
@@ -560,6 +576,33 @@ async def stream_ppt_generation(
             if db:
                 await crud.update_session(db, session_id, supplement_data=session["supplement_data"])
                 await db.commit()
+
+    if template:
+        previous_template = str((session.get("supplement_data") or {}).get("selected_template") or "").strip()
+        session["supplement_data"] = apply_template_to_supplement_data(
+            session.get("supplement_data"),
+            template,
+        )
+        current_template = str((session.get("supplement_data") or {}).get("selected_template") or "").strip()
+
+        if session["supplement_data"] is None:
+            session["supplement_data"] = {}
+        session["supplement_data"].pop("execution_plan", None)
+        session["execution_plan"] = {}
+
+        if previous_template != current_template:
+            session["outline_content"] = ""
+            if db:
+                await crud.update_session(
+                    db,
+                    session_id,
+                    outline_content="",
+                )
+                await db.commit()
+
+        if db:
+            await crud.update_session(db, session_id, supplement_data=session["supplement_data"])
+            await db.commit()
 
     # 保存用户消息
     if db and conversation_id and save_user_message:
@@ -599,8 +642,20 @@ async def stream_ppt_generation(
                     logger.error(f"Failed to get knowledge document {knowledge_id}: {e}")
             if file_path and os.path.exists(file_path):
                 try:
-                    text, meta = await DocumentParser.parse(file_path)
-                    extracted_texts.append(f"--- 文件: {att.get('filename', 'unknown')} ---\n{text}\n")
+                    parse_result = await ensure_chat_file_parsed(
+                        file_path,
+                        filename=att.get("filename"),
+                    )
+                    if parse_result.get("parse_status") != "completed":
+                        logger.info(
+                            "Skip attachment parsing for %s: %s",
+                            file_path,
+                            parse_result.get("parse_message", parse_result.get("parse_status")),
+                        )
+                        continue
+                    text = parse_result.get("extracted_text", "")
+                    if text.strip():
+                        extracted_texts.append(f"--- 文件: {att.get('filename', 'unknown')} ---\n{text}\n")
                 except Exception as e:
                     logger.error(f"Failed to parse attachment {file_path}: {e}")
         if extracted_texts:
@@ -644,7 +699,7 @@ async def stream_ppt_generation(
             # 非 PPT 请求，直接 LLM 流式回复
             response_text = ""
             async for chunk in call_llm_api_stream([
-                {"role": "system", "content": "你是 SlideAgent，一个专业的 PPT 制作助手。用户似乎没有明确的 PPT 制作需求，请友好地回应并引导用户。"},
+                {"role": "system", "content": "你是 BotSlide，一个专业的 PPT 制作助手。用户似乎没有明确的 PPT 制作需求，请友好地回应并引导用户。"},
                 {"role": "user", "content": task_instruction}
             ]):
                 if await check_pause():
@@ -723,7 +778,11 @@ async def stream_ppt_generation(
         yield f"data: {json.dumps({'type': 'message', 'content': '', 'role': 'assistant', 'streaming': False}, ensure_ascii=False)}\n\n"
 
         # 使用 LLM 动态生成补充信息
-        supplement_info = await generate_supplement_info_llm(task_instruction)
+        selected_template = str((session.get("supplement_data") or {}).get("selected_template") or template or "").strip()
+        supplement_info = await generate_supplement_info_llm(
+            task_instruction,
+            template_name=selected_template,
+        )
 
         tool_call_data = {
             'type': 'tool_call', 'tool_type': 'supplement_info',
@@ -1042,7 +1101,6 @@ async def stream_ppt_generation(
             supplement_data=session["supplement_data"],
             num_pages=actual_num_pages,
             powerpoint_type=powerpoint_type,
-            image_results=session.get("image_results", []),
             workspace_dir=session.get("workspace_dir", ""),
             execution_plan=session.get("execution_plan") or (session.get("supplement_data") or {}).get("execution_plan", {}),
         ):
@@ -1052,18 +1110,8 @@ async def stream_ppt_generation(
 
             if event_type == "slide":
                 slide_count = event["slide_count"]
-                html_content = event["html_content"]
+                html_content = _strip_images_from_html(event["html_content"])
                 description = event.get("description", f"第 {slide_count} 页")
-
-                try:
-                    html_content = replace_image_placeholders(html_content, session.get("image_results", []))
-                except Exception as e:
-                    logger.error(f"Failed to replace image placeholders for slide {slide_count}: {e}")
-
-                try:
-                    html_content = await inline_all_resources(html_content, timeout=30)
-                except Exception as e:
-                    logger.error(f"Failed to inline resources for slide {slide_count}: {e}")
 
                 slide_tool_data = {
                     'type': 'tool_call', 'tool_type': 'ppt_generate',

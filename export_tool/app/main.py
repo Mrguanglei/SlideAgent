@@ -25,6 +25,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+class HealthCheckAccessFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "/api/export_tool/health" not in record.getMessage()
+
+
+logging.getLogger("uvicorn.access").addFilter(HealthCheckAccessFilter())
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """

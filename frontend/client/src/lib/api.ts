@@ -115,22 +115,72 @@ export interface UploadResponse {
   content_type: string;
   size: number;
   knowledge_document_id?: number;
+  uploadProgress?: number;
+  upload_status?: "uploading" | "uploaded";
+  parse_status?: "pending" | "parsing" | "completed" | "failed" | "unsupported";
+  parse_message?: string;
+  content_length?: number;
+  file_type?: string | null;
 }
 
 /**
  * 上传文件
  */
-export async function uploadFile(file: File): Promise<UploadResponse> {
+export async function uploadFile(
+  file: File,
+  onProgress?: (progress: number) => void
+): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
 
-  const response = await fetch(`${API_BASE}/files/upload`, {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API_BASE}/files/upload`);
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable || !onProgress) return;
+      onProgress(Math.round((event.loaded / event.total) * 100));
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch {
+          reject(new Error("Failed to parse upload response"));
+        }
+      } else {
+        reject(new Error("Failed to upload file"));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error("Failed to upload file"));
+    xhr.send(formData);
+  });
+}
+
+export interface ParseFileResponse {
+  parse_status: "pending" | "parsing" | "completed" | "failed" | "unsupported";
+  parse_message: string;
+  file_type?: string | null;
+  content_length?: number;
+}
+
+export async function parseUploadedFile(
+  filePath: string,
+  filename?: string
+): Promise<ParseFileResponse> {
+  const response = await fetch(`${API_BASE}/files/parse`, {
     method: "POST",
-    body: formData,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      file_path: filePath,
+      filename,
+    }),
   });
 
   if (!response.ok) {
-    throw new Error("Failed to upload file");
+    throw new Error("Failed to parse file");
   }
 
   return response.json();
@@ -301,6 +351,7 @@ export async function exportPPT(request: ExportRequest): Promise<Blob> {
 export interface ShareRequest {
   project_id: number;
   version_id?: number;
+  view_mode?: "original" | "modified";
   expire_days?: number;
 }
 
@@ -337,8 +388,18 @@ export async function createShare(request: ShareRequest): Promise<ShareResponse>
 /**
  * 获取分享数据
  */
-export async function getShareData(shareId: string): Promise<any> {
-  const response = await fetch(`${API_BASE}/ppt/share/${shareId}`);
+export async function getShareData(
+  shareId: string,
+  options?: { versionId?: number }
+): Promise<any> {
+  const query = new URLSearchParams();
+  if (options?.versionId !== undefined) {
+    query.set("version_id", String(options.versionId));
+  }
+  const queryString = query.toString();
+  const response = await fetch(
+    `${API_BASE}/ppt/share/${shareId}${queryString ? `?${queryString}` : ""}`
+  );
   if (!response.ok) {
     throw new Error("Share not found or expired");
   }

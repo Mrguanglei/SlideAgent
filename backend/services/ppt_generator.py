@@ -4,7 +4,6 @@ PPTAgent PPT 生成服务模块
 提供 PPT 生成核心功能
 """
 
-import base64
 import json
 import logging
 import re
@@ -14,6 +13,7 @@ from pathlib import Path
 from typing import AsyncGenerator, Optional, Dict, List, Tuple
 
 from utils.config import Config
+from services.template_presets import build_template_prompt_block
 
 logger = logging.getLogger(__name__)
 
@@ -56,30 +56,6 @@ def parse_num_pages(supplement_data: dict, default: int = 15) -> int:
 def generate_slide_thinking(slide_count: int, topic: str) -> Optional[str]:
     """生成幻灯片创建后的固定模板思考文字（不调用LLM）"""
     return f"第 {slide_count} 页已完成，正在继续生成下一页..."
-
-
-def _image_to_data_uri(local_path: str) -> Optional[str]:
-    """将本地图片文件转为 base64 data URI"""
-    try:
-        path = Path(local_path)
-        if not path.exists():
-            return None
-        data = path.read_bytes()
-        ext = path.suffix.lower().lstrip(".")
-        mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
-                "webp": "image/webp", "gif": "image/gif"}.get(ext, "image/jpeg")
-        b64 = base64.b64encode(data).decode()
-        return f"data:{mime};base64,{b64}"
-    except Exception as e:
-        logger.warning(f"Failed to convert image to data URI: {local_path}: {e}")
-        return None
-
-
-_BACKGROUND_EXCLUDE_KEYWORDS = [
-    "chart", "graph", "table", "diagram", "infographic", "schema", "workflow",
-    "screenshot", "dashboard", "ui", "icon", "logo", "banner",
-    "图表", "表格", "示意", "流程图", "架构", "数据", "截图", "界面", "仪表盘",
-]
 
 _HTML_HINT_RE = re.compile(r"<!DOCTYPE html>|<html\\b|<body\\b", re.IGNORECASE)
 _SLIDE_NARRATION_RE = re.compile(
@@ -159,76 +135,6 @@ def _extract_html_from_tool_args(tool_args: Dict) -> Tuple[str, Optional[str], O
     except Exception:
         index = None
     return html_content, file_path, index, description
-
-
-def _is_background_candidate(img: Dict) -> bool:
-    """判断图片是否适合作为整页背景（启发式）"""
-    desc = (img.get("description") or "").lower()
-    url = (img.get("url") or "").lower()
-    text = f"{desc} {url}"
-
-    if any(keyword in text for keyword in _BACKGROUND_EXCLUDE_KEYWORDS):
-        return False
-
-    width = img.get("width") or 0
-    height = img.get("height") or 0
-    if not width or not height:
-        return False
-
-    if width < 900 or height < 500:
-        return False
-
-    ratio = width / height if height else 0
-    if ratio < 1.2 or ratio > 2.2:
-        return False
-
-    return True
-
-
-def replace_image_placeholders(html: str, image_results: List[Dict]) -> str:
-    """替换 HTML 中的图片占位符和假 URL 为本地图片的 base64 data URI
-
-    处理策略（按优先级）：
-    1. 替换 {{img_N}} 占位符为对应图片的 base64
-    2. 替换 example.com 等虚假 URL 为可用图片的 base64
-    3. 替换其他无法访问的外部图片 URL 为可用图片的 base64
-    """
-    if not image_results:
-        return html
-
-    # 构建占位符 → data_uri 映射
-    placeholder_map = {}
-    data_uris = []
-    for i, img in enumerate(image_results):
-        local_path = img.get("local_path", "")
-        data_uri = _image_to_data_uri(local_path)
-        if data_uri:
-            placeholder_map[f"{{{{img_{i + 1}}}}}"] = data_uri
-            data_uris.append(data_uri)
-
-    if not data_uris:
-        return html
-
-    # 第一步：替换占位符 {{img_N}}
-    for placeholder, data_uri in placeholder_map.items():
-        html = html.replace(placeholder, data_uri)
-
-    # 第二步：替换假 URL（example.com 等明显的占位地址）
-    fake_url_pattern = re.compile(
-        r'src="(https?://(?:example\.com|placeholder\.com|via\.placeholder\.com|placehold\.it|picsum\.photos|dummyimage\.com)[^"]*)"'
-    )
-    used_idx = 0
-    def _replace_fake(match):
-        nonlocal used_idx
-        if used_idx < len(data_uris):
-            replacement = data_uris[used_idx]
-            used_idx += 1
-            return f'src="{replacement}"'
-        return match.group(0)
-
-    html = fake_url_pattern.sub(_replace_fake, html)
-
-    return html
 
 
 async def run_slide_edit_agent(
@@ -428,7 +334,6 @@ async def run_slide_design_agent(
     supplement_data: dict,
     num_pages: int,
     powerpoint_type: str = "16:9 Widescreen",
-    image_results: Optional[List[Dict]] = None,
     workspace_dir: Optional[str] = None,
     execution_plan: Optional[Dict] = None,
 ) -> AsyncGenerator[dict, None]:
@@ -463,38 +368,6 @@ async def run_slide_design_agent(
             workspace = Path(tempfile.mkdtemp(prefix="ppt_"))
         md_file = workspace / "manuscript.md"
 
-        # 构建图片素材章节（使用占位符）
-        image_section = ""
-        if image_results:
-            image_section = "\n## 可用图片素材\n以下图片已验证可用。在 HTML 的 <img> 标签中，使用 {{img_N}} 作为 src 的值。\n\n"
-
-            indexed_images = list(enumerate(image_results, 1))
-            background_candidates = [(i, img) for i, img in indexed_images if _is_background_candidate(img)]
-            content_images = [(i, img) for i, img in indexed_images if not _is_background_candidate(img)]
-
-            image_section += "### 背景候选（仅用于封面/整页背景）\n"
-            if background_candidates:
-                for i, img in background_candidates:
-                    desc = img.get("description", "图片") or "图片"
-                    w = img.get("width", 0)
-                    h = img.get("height", 0)
-                    image_section += f"{i}. {{{{img_{i}}}}} — {desc} ({w}×{h})\n"
-            else:
-                image_section += "无\n"
-
-            image_section += "\n### 内容配图（用于插图/示意，不作背景）\n"
-            if content_images:
-                for i, img in content_images:
-                    desc = img.get("description", "图片") or "图片"
-                    w = img.get("width", 0)
-                    h = img.get("height", 0)
-                    image_section += f"{i}. {{{{img_{i}}}}} — {desc} ({w}×{h})\n"
-            else:
-                image_section += "无\n"
-
-            image_section += "\n示例：<img src=\"{{img_1}}\" alt=\"描述\">\n\n"
-            logger.info(f"Added {len(image_results)} image placeholders to markdown")
-
         md_content = f"""# {topic}
 
 ## PPT大纲
@@ -508,29 +381,23 @@ async def run_slide_design_agent(
 ## 深度分析
 
 {deep_thinking_content[:2000] if deep_thinking_content else '无'}
-{image_section}"""
+
+## 设计限制
+
+- 禁止使用任何图片（包括 `<img>`、`background-image: url(...)`、外链图片、占位符图片）
+- 仅使用文字、形状、配色、边框、渐变完成视觉表达
+"""
         md_file.write_text(md_content, encoding="utf-8")
         logger.info(f"Created markdown file at: {md_file}")
         
         # 创建 InputRequest
         ppt_type = PowerPointType.WIDE_SCREEN if "16:9" in powerpoint_type else PowerPointType.STANDARD
         
-        # 将大纲内容直接嵌入到 instruction 中
-        image_instruction = ""
-        if image_results:
-            image_instruction = """
-⚠️ 重要：markdown 文件中提供了可用图片素材，使用 {{img_N}} 占位符引用。
-- 必须使用 <img> 标签引用图片，例如：<img src="{{img_1}}" alt="描述">
-- ⛔ 严禁使用 CSS background-image: url() 引用图片（导出 PPTX 时会丢失）
-- 背景优先使用纯色或渐变；只有在“背景候选”列表中存在合适图片时才可作为背景
-- “内容配图”仅用于插图/示意，禁止用于整页背景
-- 封面背景图请用绝对定位 <img> + 半透明遮罩 div 实现
-- 严禁编造任何图片 URL，只能使用 {{img_N}} 占位符
-- 内容页可在相关内容旁配图以增强视觉效果
-"""
-
-        style_pref = supplement_data.get("style", "")
-        color_pref = supplement_data.get("color_preference") or supplement_data.get("theme_color") or ""
+        template_name = supplement_data.get("selected_template") or supplement_data.get("template")
+        has_template = bool(str(template_name or "").strip())
+        style_pref = "" if has_template else supplement_data.get("style", "")
+        color_pref = "" if has_template else (supplement_data.get("color_preference") or supplement_data.get("theme_color") or "")
+        template_prompt_block = build_template_prompt_block(template_name)
         preference_lines = []
         if style_pref:
             preference_lines.append(f"设计风格偏好：{style_pref}")
@@ -561,7 +428,9 @@ async def run_slide_design_agent(
 {design_directives_text}
 """
 
-        enhanced_instruction = f"""{topic}{preference_block}
+        template_block = f"\n{template_prompt_block}\n" if template_prompt_block else ""
+
+        enhanced_instruction = f"""{topic}{preference_block}{template_block}
 
 ⭐⭐⭐ 重要：请严格按照以下已生成的 PPT 大纲来创建幻灯片！⭐⭐⭐
 
@@ -577,7 +446,7 @@ async def run_slide_design_agent(
 - 若页面为重点内容页，请提供更完整的要点与说明
 - 每个内容页至少 3 条要点，重点页建议 4-6 条
 - 专注于视觉设计和排版，让内容更加美观
-{image_instruction}"""
+- 禁止使用任何图片：不要输出 `<img>`，不要使用 `background-image: url(...)`"""
         
         input_request = InputRequest(
             instruction=enhanced_instruction,

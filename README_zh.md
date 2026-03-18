@@ -187,7 +187,7 @@ export_tool/         # 导出服务 (PDF/PNG/HTML/PPTX)
 
 欢迎各种形式的贡献！如果您有任何想法或建议，欢迎提交 Pull Request 或 Issue。
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Mrguanglei/SlideAgent&type=Date)](https://star-history.com/#Mrguanglei/SlideAgent&Date)
+
 
 ## 🙏 致谢
 
