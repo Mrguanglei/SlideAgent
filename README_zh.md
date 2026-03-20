@@ -1,6 +1,11 @@
 <div align="center">
-  <img src="images/logs.png" width="800"/>
+  <img src="images/page.png" width="800"/>
   <br /><br />
+
+智能演示引擎，生成万物
+</br>
+<em>Intelligent Presentation Engine, Generating Everything</em>
+
 
 [![GitHub Repo stars](https://img.shields.io/github/stars/Mrguanglei/SlideAgent?style=social)](https://github.com/Mrguanglei/SlideAgent/stargazers)
 [![license](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](https://github.com/Mrguanglei/SlideAgent/blob/main/LICENSE)
